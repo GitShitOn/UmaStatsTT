@@ -1,0 +1,7 @@
+# dati personali delle sessioni e output generati
+data/
+export/
+*.json
+report*.md
+__pycache__/
+*.pyc
