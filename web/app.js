@@ -206,12 +206,37 @@
 
   // ------------------------------------------------------------ sections
 
+  function reliabilityPanel(A) {
+    const R = A.reliability;
+    const label = { reliable: 'Reliable', preliminary: 'Preliminary', 'very limited': 'Very limited' }[R.level];
+    const cls = R.level === 'reliable' ? 'good' : R.level === 'preliminary' ? '' : 'bad';
+    let detail;
+    if (R.level === 'reliable') {
+      detail = `Every uma on the team has at least ${R.minRaces} races; ${R.reliableRaces} are enough for reliable results.`;
+    } else {
+      const counts = [...new Set(R.few.map((f) => f.n))].sort((x, y) => x - y);
+      const shortTxt = R.few.length === R.nCurrent
+        ? `Every uma on the team has ${counts.length === 1 ? counts[0] : `${counts[0]}–${counts[counts.length - 1]}`} ${plural(counts[counts.length - 1], 'race', 'races')} so far.`
+        : `Still short: ${R.few.slice(0, 6).map((f) => `${f.name} (${f.n})`).join(', ')}${R.few.length > 6 ? ', …' : ''}.`;
+      const need = R.reliableRaces - R.minRaces;
+      detail = `For reliable results load at least ${R.reliableRaces} sessions with the same team (${R.reliableRaces} races per uma); below ${R.minRacesNeeded} the per-uma numbers are only a first idea. ${shortTxt} About ${need} more ${plural(need, 'session', 'sessions')} needed.`;
+    }
+    const done = Math.min(1, R.minRaces / R.reliableRaces);
+    const meterLabel = R.minRaces >= R.reliableRaces ? `${R.minRaces} races per uma (${R.reliableRaces} needed)` : `${R.minRaces} of ${R.reliableRaces} races per uma`;
+    return `<div class="panel reliability">
+      <div class="rel-head"><h3>Data reliability</h3><span class="flag ${cls}">${label}</span><span class="small muted">${R.sessions} ${plural(R.sessions, 'session', 'sessions')} · ${R.races} races</span></div>
+      <div class="rel-meter"><div class="meter" role="img" aria-label="${esc(meterLabel)}"><i style="width:${(done * 100).toFixed(0)}%"></i></div><span class="small">${esc(meterLabel)}</span></div>
+      <p class="note">${esc(detail)} With ${R.reliableRaces} races an uma’s average points land within ±1,500 of its long-run value 9 times out of 10; with 5 races, 2 times out of 3.</p>
+    </div>`;
+  }
+
   function secSummary(A) {
     const top = A.recs.est.slice(0, 5);
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
     const apt = A.recs.notes.filter((n) => n.prio === 1);
     return `<section class="section" id="summary" aria-labelledby="h-summary">
       ${sectionHead('summary', 'Summary', 'The big picture')}
+      ${reliabilityPanel(A)}
       <div class="tiles">
         ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}`)}
         ${tile('Average points per race', fi(A.raceAvg), `${A.nRaces} races`)}
@@ -334,7 +359,7 @@
       const uniRate = d.uniqueK / n < 0.6 ? `<span class="flag${d.uniqueK === 0 ? ' bad' : ''}">${d.uniqueK}/${n}</span>` : `${d.uniqueK}/${n}`;
       const uni = d.hasUnique ? `${uniRate}${d.uniqueLevel ? ` <span class="muted">L${d.uniqueLevel}</span>` : ''}` : '–';
       return `<tr${u.current ? '' : ' class="ex"'}>
-        <td class="first">${esc(u.name)}${umaTag(u)}</td>
+        <td class="first">${esc(u.name)}${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
         <td>${posRow(u.finishes)}</td>
         <td class="n">${fi(u.avgRaw)}</td>
         <td class="n">${ff(d.white, 1)}</td>
@@ -352,7 +377,7 @@
     return `<div class="table-wrap"><table>
       <thead><tr><th class="first">Uma</th><th>Finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <p class="note">Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
+      <p class="note">${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
 
   function umaCard(u) {
@@ -361,7 +386,8 @@
     const apt = (v) => esc(E.APT[v] || '?');
     const races = u.races.map((r) => `<tr><td>${esc(shortLabel(r.session))} · R${r.rnd}</td><td>${r.distance ? `${fi(r.distance)} m` : '–'}</td><td>${posBadge(r.finish)}</td><td class="n">${r.popularity}</td><td>${esc(r.mood)}</td><td class="n">${fi(r.raw)}</td><td class="n">${fi(r.final)}</td><td class="n">${r.white}/${r.gold}/${r.unique}</td><td class="wrap">${noteFlags(r.notes)}</td></tr>`).join('');
     const sk = u.skills.map((s) => `<tr><td class="wrap">${esc(s.name || '?')}${s.acts ? '' : ' <span class="flag">never</span>'}</td><td class="n muted">${s.id}</td><td>${esc(s.kind)}</td><td class="n">L${s.level}</td><td class="n">${s.acts}/${u.n}</td><td class="n">${fi(s.points)}</td></tr>`).join('');
-    const tag = !u.current ? ' <span class="tag ex">no longer on the team</span>' : u.slot === 1 ? ' <span class="tag">first uma</span>' : '';
+    const tag = (!u.current ? ' <span class="tag ex">no longer on the team</span>' : u.slot === 1 ? ' <span class="tag">first uma</span>' : '')
+      + (u.current && u.n < E.RELIABLE_RACES ? ` <span class="tag ex">${u.n} ${plural(u.n, 'race', 'races')} · preliminary</span>` : '');
     return `<details class="card${u.current ? '' : ' ex'}" id="uma-${esc(u.key)}">
       <summary>
         <span class="card-title"><strong>${esc(u.name)}</strong><span>${distChip(u.mainDist, u.distLabel)} ${esc(style)}${tag}</span></span>

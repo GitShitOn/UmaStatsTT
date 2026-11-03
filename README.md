@@ -100,6 +100,28 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 | Skills | Activations and points per skill, skills that never fired |
 | What to improve | Full list of priorities, with an estimated gain |
 
+## How many files you need
+
+Each session file holds 5 races, and every uma on your team runs once per session, so
+**sessions = races per uma**. Measured on 77 sessions:
+
+| Sessions (races per uma) | Average base points within ±1,500 | Average place within ±1 | Rates* within ±15 points | Session total within |
+|---|---|---|---|---|
+| 5 | 65% of the time | 80% | 49-90% | ±6.4% |
+| 10 | 83% | 93% | 76-94% | ±4.5% |
+| **15** | **92%** | **98%** | **87-98%** | **±3.7%** |
+| 20 | 96% | 99% | 94-99% | ±3.2% |
+
+\* rushed, perfect start, unique skill firing, running out of HP.
+
+- **Recommended: at least 15 sessions with the same team.** From there the per-uma numbers
+  and the advice are reliable.
+- **5 sessions** are enough for a first idea; below that, treat per-uma numbers with care.
+- When you change the team, the count restarts for the new umas.
+
+The report (and the web app's "Data reliability" panel) shows how far you are from 15 races
+per uma and which umas are still short.
+
 ## How the score works (derived from the data)
 
 Every event is worth **base points**. Each item is then multiplied by `1 + bonuses`, and the

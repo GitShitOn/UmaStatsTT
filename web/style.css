@@ -308,6 +308,13 @@ a { color: inherit; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .note { color: var(--ink-2); font-size: var(--step--1); max-width: 80ch; }
 
+/* data reliability */
+.reliability { display: grid; gap: 10px; }
+.reliability > h3, .rel-head h3 { margin: 0; }
+.rel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.rel-meter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rel-meter .meter { flex: 1 1 160px; max-width: 360px; height: 8px; }
+
 /* number tiles */
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 2px; min-width: 0; }

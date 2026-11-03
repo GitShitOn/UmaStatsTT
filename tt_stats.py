@@ -721,6 +721,44 @@ def team_changes(sessions: List[Session], umas: List[UmaAgg]) -> List[dict]:
     return out
 
 
+# How many races per uma (= sessions, since every uma runs once per session) the results need.
+# Measured on 77 sessions: with 15 races an uma's average base points land within +-1,500 of the
+# long-run value 92% of the time and its average place within +-1 98% of the time; with 5 races
+# only 65% and 80%. Rates (rushed, perfect start, unique, out of HP) need 15-20 races to sit
+# within +-15 points.
+RELIABLE_RACES = 15
+MIN_RACES = 5
+
+
+def reliability(umas: List[UmaAgg], sessions: List[Session]) -> dict:
+    """How much the current data can be trusted: level, races per current uma, umas still short."""
+    cur = [a for a in umas if a.current] or umas
+    min_n = min(a.n for a in cur) if cur else 0
+    few = sorted(((a.name, a.n) for a in cur if a.n < RELIABLE_RACES), key=lambda x: (x[1], x[0]))
+    level = "reliable" if min_n >= RELIABLE_RACES else "preliminary" if min_n >= MIN_RACES else "very limited"
+    return dict(level=level, sessions=len(sessions), races=sum(len(s.races) for s in sessions),
+                min_races=min_n, few=few, n_current=len(cur))
+
+
+def reliability_text(rel: dict) -> str:
+    head = (f"Data: {rel['sessions']} {plural(rel['sessions'], 'session', 'sessions')} "
+            f"({rel['races']} races). Reliability: {rel['level'].upper()}.")
+    if rel["level"] == "reliable":
+        return (f"{head} Every uma on the team has at least {rel['min_races']} races "
+                f"({RELIABLE_RACES} are enough for reliable results).")
+    counts = sorted({n for _nm, n in rel["few"]})
+    if len(rel["few"]) == rel["n_current"]:
+        rng = f"{counts[0]}" if len(counts) == 1 else f"{counts[0]}-{counts[-1]}"
+        short = f"Every uma on the team has {rng} {plural(counts[-1], 'race', 'races')} so far."
+    else:
+        short = ("Umas still short (races so far): " + ", ".join(f"{nm} ({n})" for nm, n in rel["few"][:6]) +
+                 (", ..." if len(rel["few"]) > 6 else "") + ".")
+    need = RELIABLE_RACES - rel["min_races"]
+    return (f"{head} Recommended: at least {RELIABLE_RACES} sessions with the same team, i.e. {RELIABLE_RACES} "
+            f"races per uma; below {MIN_RACES} the per-uma numbers are only a first idea. {short} About {need} more "
+            f"{plural(need, 'session', 'sessions')} needed.")
+
+
 def rushed_chance(wiz: int) -> float:
     """Theoretical chance of getting rushed given Wit: ((6.5 / log10(0.1*WIT + 1))^2)%."""
     if wiz <= 0:
@@ -854,6 +892,9 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     est, notes = make_recommendations(umas, races, all_ur, mult_std, skills)
 
     R.h2("Summary")
+    rel = reliability(umas, sessions)
+    R.p(reliability_text(rel))
+    R.p()
     R.p(f"Average {fi(sum(s.total for s in sessions) / len(sessions))} points per session, "
         f"{fi(sum(s.total for s in sessions) / n_races)} per race. The 5 things worth the most "
         f"(estimated final points per session):")
@@ -997,7 +1038,8 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     rows = []
     for a in umas:
         rows.append([a.label, a.dist_label, STYLE_NAMES.get(a.last.style, "?"),
-                     ("former" if not a.current else "ACE" if a.last.slot == 1 else str(a.last.slot)), a.n,
+                     ("former" if not a.current else "ACE" if a.last.slot == 1 else str(a.last.slot)),
+                     f"{a.n}{'*' if a.n < RELIABLE_RACES else ''}",
                      ff(a.avg("finish"), 1),
                      ("+" + str(a.n - 12) + " " if a.n > 12 else "") + " ".join(str(r.finish) for r in a.races[-12:]),
                      fi(a.avg("raw")), fi(a.avg("final")),
@@ -1007,6 +1049,8 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
                      fi(safe_mean([r.cat_raw["rushed"] for r in a.races]))])
     R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Last finishes", "Base/r", "Final/r",
              "Placing", "Skills", "Pos/start", "Rushed"], rows, "lllrrrlrrrrrr")
+    if any(a.n < RELIABLE_RACES for a in umas):
+        R.p(f"* fewer than {RELIABLE_RACES} races: the numbers for this uma are still preliminary.")
     R.p("Placing/Skills/Pos-start/Rushed columns = average base points per race from: finishing position,")
     R.p("skills, perfect start + leading own strategy (1/6 and 2/3), rushed penalty.")
 
@@ -1368,12 +1412,12 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                      f"and {pct(l23)} of runs" + (f"; never by: {', '.join(never_lead)}" if never_lead else "") +
                      ". What counts is being ahead of every other uma with the SAME strategy, opponents included."))
 
-    # Umas with little data
-    few = [a for a in cur if a.n < 3]
+    # Umas with little data (only when the rest of the team already has enough)
+    few = [a for a in cur if a.n < RELIABLE_RACES]
     if few and len(few) < len(cur):
-        notes.append((2, "Too few races to judge reliably: " +
+        notes.append((2, f"Not enough races yet for: " +
                       ", ".join(f"{a.name} ({a.n} {plural(a.n, 'race', 'races')})" for a in few) +
-                      ". Their statistics become reliable after a few sessions."))
+                      f". Their numbers become reliable at {RELIABLE_RACES} races."))
 
     # Finishing position
     worst = sorted(cur, key=lambda a: -(a.avg("finish") or 0))[:3]
