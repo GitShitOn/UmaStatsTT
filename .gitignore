@@ -2,6 +2,7 @@
 data/
 export/
 *.json
+!skill_names.json
 report*.md
 __pycache__/
 *.pyc

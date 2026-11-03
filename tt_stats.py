@@ -738,23 +738,38 @@ class Report:
         return "\n".join(self.lines).rstrip() + "\n"
 
 
-def skill_label(sid: int, names: Dict[int, str]) -> str:
-    n = names.get(sid)
-    return f"{n} ({sid})" if n else str(sid)
+@dataclass
+class SkillDB:
+    names: Dict[int, str] = field(default_factory=dict)
+    rarity: Dict[int, int] = field(default_factory=dict)
 
+    def name(self, sid: int) -> Optional[str]:
+        n = self.names.get(sid)
+        if n and 900000 <= sid < 1000000 and "inherit" not in n.lower():
+            n += " (inherited)"
+        return n
 
-def skill_kind_guess(sid: int) -> str:
-    if 100000 <= sid < 200000:
-        return "unica"
-    if 900000 <= sid < 1000000:
-        return "ereditata"
-    return "?"
+    def label(self, sid: int) -> str:
+        n = self.name(sid)
+        return f"{n} [{sid}]" if n else str(sid)
+
+    def kind(self, sid: int, observed: Optional[str] = None) -> str:
+        """Tipo in italiano: dal database, altrimenti dal punteggio osservato, altrimenti dall'ID."""
+        if 900000 <= sid < 1000000:
+            return "unica ered."
+        r = self.rarity.get(sid)
+        if r:
+            return "bianca" if r == 1 else "oro" if r == 2 else "unica"
+        if observed in SKILL_KIND_IT:
+            return SKILL_KIND_IT[observed]
+        return "unica" if 100000 <= sid < 200000 else "?"
 
 
 SKILL_KIND_IT = {"unique": "unica", "gold": "oro", "white": "bianca"}
+START_SKILLS = {200431, 200432}  # Concentration (oro) e Focus (bianca): riducono il ritardo in partenza
 
 
-def build_report(sessions: List[Session], args, skill_names: Dict[int, str]) -> str:
+def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R = Report(markdown=bool(args.md_mode))
     races = [r for s in sessions for r in s.races]
     umas = aggregate_umas(sessions)
@@ -776,7 +791,7 @@ def build_report(sessions: List[Session], args, skill_names: Dict[int, str]) -> 
         for k, v in s.bonus_rates.items():
             allrates[k] += v
     mult_std = 1 + sum(safe_mean(allrates.get(k, []), 0) for k in ("avversario", "supporto"))
-    est, notes = make_recommendations(umas, races, all_ur, mult_std)
+    est, notes = make_recommendations(umas, races, all_ur, mult_std, skills)
 
     R.h2("In sintesi")
     R.p(f"Media {fi(sum(s.total for s in sessions) / len(sessions))} punti a sessione, "
@@ -1024,16 +1039,19 @@ def build_report(sessions: List[Session], args, skill_names: Dict[int, str]) -> 
                 f"punti base da skill {fi(sum(pts.values()) / a.n)}/gara.")
         R.p(line)
         if never:
-            R.p("    Mai attivate in " + f"{a.n} gare: " + ", ".join(skill_label(s, skill_names) for s in sorted(never)))
+            R.p(f"    Mai attivate in {a.n} gare: " +
+                ", ".join(f"{skills.label(s)} ({skills.kind(s, types.get(s))})" for s in sorted(never)))
         if args.skill:
             rows = []
             for sid in sorted(owned, key=lambda s: (-acts[s], s)):
-                kind = SKILL_KIND_IT.get(types.get(sid), skill_kind_guess(sid))
-                rows.append([skill_label(sid, skill_names), kind, f"L{owned[sid]}", f"{acts[sid]}/{a.n}", fi(pts[sid])])
-            R.table(["Skill", "Tipo", "Liv.", "Attivazioni", "Punti base"], rows, "lllrr")
-    if not skill_names:
+                rows.append([skills.name(sid) or "?", sid, skills.kind(sid, types.get(sid)), f"L{owned[sid]}",
+                             f"{acts[sid]}/{a.n}", fi(pts[sid])])
+            R.table(["Skill", "ID", "Tipo", "Liv.", "Attivazioni", "Punti base"], rows, "lrllrr")
+    all_ids = {sid for u in all_ur for sid in u.skills_owned}
+    unnamed = sorted(sid for sid in all_ids if not skills.name(sid))
+    if unnamed:
         R.p()
-        R.p("(Gli ID skill si cercano su GameTora; con --nomi-skill FILE.json si possono mostrare i nomi.)")
+        R.p(f"({len(unnamed)} skill senza nome nel database: aggiornalo con --aggiorna-nomi.)")
 
     # ---------------- Priorita'
     R.h2("Cosa migliorare (priorita' stimate)")
@@ -1091,13 +1109,14 @@ def build_report(sessions: List[Session], args, skill_names: Dict[int, str]) -> 
     return R.render()
 
 
-def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[UmaRace],
-                         mult: float) -> Tuple[List[Tuple[float, str]], List[Tuple[int, str]]]:
+def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[UmaRace], mult: float,
+                         skills: Optional[SkillDB] = None) -> Tuple[List[Tuple[float, str]], List[Tuple[int, str]]]:
     """Restituisce (stime, note).
 
     stime = [(guadagno stimato in punti FINALI per sessione, testo)]
     note  = [(priorita', testo)] per le indicazioni non quantificabili.
     """
+    skills = skills or SkillDB()
     est: List[Tuple[float, str]] = []
     notes: List[Tuple[int, str]] = []
     n_sessions = max(1, len({r.session for r in races}))
@@ -1150,8 +1169,10 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
             k = a.count(lambda r: r.cat_count["unique"] > 0)
             if k / n < 0.6:
                 val = safe_mean([r.unique_value for r in a.races if r.unique_value]) or 2400
+                uid = next((sid for sid in a.last.skills_owned if 100000 <= sid < 200000), None)
+                uname = f" \"{skills.name(uid)}\"" if uid and skills.name(uid) else ""
                 est.append(((1 - k / n) * val * m * per_session,
-                            f"{a.name}: skill unica attivata solo {k}/{n} volte ({fi(val)} base ciascuna): le sue "
+                            f"{a.name}: skill unica{uname} attivata solo {k}/{n} volte ({fi(val)} base ciascuna): le sue "
                             f"condizioni (posizione/fase di gara) si verificano di rado con stile e distanza attuali."))
 
         # Rushed frequente per la singola uma
@@ -1231,10 +1252,22 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
         rate = sum(1 for u in starts if u.cat_count["start"]) / len(starts)
         per_session = len(all_ur) / n_sessions
         gain = max(0.0, 0.5 - rate) * 1000 * mult * per_session
+        # chi ha una skill di partenza (Concentration / Focus) e con che risultati
+        groups = []
+        for sid in sorted(START_SKILLS):  # la prima (oro) ha la precedenza se un'uma le ha entrambe
+            done = {id(u) for _s, g in groups for u in g}
+            groups.append((skills.name(sid) or str(sid),
+                           [u for u in starts if sid in u.skills_owned and id(u) not in done]))
+        done = {id(u) for _s, g in groups for u in g}
+        groups.append(("nessuna delle due", [u for u in starts if id(u) not in done]))
+        parts = [f"{nm} {sum(1 for u in g if u.cat_count['start'])}/{len(g)} ({', '.join(sorted({u.name for u in g}))})"
+                 if nm != "nessuna delle due" else f"{nm} {sum(1 for u in g if u.cat_count['start'])}/{len(g)}"
+                 for nm, g in groups if g]
+        detail = " Partenze perfette per skill: " + "; ".join(parts) + "."
         if gain > 0:
             est.append((gain, f"Partenza perfetta nel {pct(rate)} dei casi (+1.000 base ognuna). E' casuale (~20% "
                               f"senza aiuti), ma le skill che riducono il ritardo in partenza la rendono molto piu' "
-                              f"frequente: arrivare al 50% varrebbe ~{fi(gain)} a sessione."))
+                              f"frequente: arrivare al 50% varrebbe ~{fi(gain)} a sessione.{detail}"))
 
     # 1a del proprio stile
     l16 = sum(1 for u in all_ur if u.cat_count["lead16"]) / len(all_ur)
@@ -1278,7 +1311,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
 # ---------------------------------------------------------------------------
 
 
-def export_csv(sessions: List[Session], outdir: str) -> List[str]:
+def export_csv(sessions: List[Session], outdir: str, skills: Optional[SkillDB] = None) -> List[str]:
+    skills = skills or SkillDB()
     os.makedirs(outdir, exist_ok=True)
     written = []
     p1 = os.path.join(outdir, "uma_gare.csv")
@@ -1319,7 +1353,7 @@ def export_csv(sessions: List[Session], outdir: str) -> List[str]:
     p3 = os.path.join(outdir, "skill.csv")
     with open(p3, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["uma", "tcid", "skill_id", "livello", "tipo", "gare", "attivazioni", "punti_base"])
+        w.writerow(["uma", "tcid", "skill_id", "nome", "livello", "tipo", "gare", "attivazioni", "punti_base"])
         for a in aggregate_umas(sessions):
             owned, acts, types, pts = {}, Counter(), {}, Counter()
             for r in a.races:
@@ -1328,7 +1362,7 @@ def export_csv(sessions: List[Session], outdir: str) -> List[str]:
                 types.update(r.skill_type)
                 pts.update(r.skill_points)
             for sid in sorted(owned):
-                w.writerow([a.name, a.tcid, sid, owned[sid], SKILL_KIND_IT.get(types.get(sid), skill_kind_guess(sid)),
+                w.writerow([a.name, a.tcid, sid, skills.name(sid) or "", owned[sid], skills.kind(sid, types.get(sid)),
                             a.n, acts[sid], pts[sid]])
     written.append(p3)
     return written
@@ -1339,29 +1373,87 @@ def export_csv(sessions: List[Session], outdir: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def load_skill_names(path: Optional[str]) -> Dict[int, str]:
-    """Accetta {"200012": "Nome"} oppure [{"id": 200012, "name_en": "Nome"}, ...]."""
-    if not path:
-        return {}
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    out: Dict[int, str] = {}
+SKILL_DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skill_names.json")
+SKILL_SRC_BASE = "https://raw.githubusercontent.com/alpha123/uma-tools/master/umalator-global/"
+
+
+def load_skill_db(*paths: Optional[str]) -> SkillDB:
+    """Carica nomi (e rarita') delle skill. I file successivi sovrascrivono i precedenti.
+
+    Formati accettati: {"200012": "Nome"}, {"200012": ["Nome", rarita']},
+    {"200012": {"name_en": "Nome", "rarity": 1}} oppure [{"id": 200012, "name_en": "Nome"}, ...].
+    """
+    db = SkillDB()
     name_keys = ("name_en", "enname", "name", "name_jp", "jpname")
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if isinstance(v, dict):
-                v = next((v[nk] for nk in name_keys if v.get(nk)), None)
-            if v and str(k).isdigit():
-                out[int(k)] = str(v)
-    elif isinstance(data, list):
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            sid = item.get("id", item.get("skill_id"))
-            nm = next((item[nk] for nk in name_keys if item.get(nk)), None)
-            if sid is not None and nm:
-                out[int(sid)] = str(nm)
+
+    def add(sid, val):
+        name = rar = None
+        if isinstance(val, list):
+            name = val[0] if val else None
+            rar = val[1] if len(val) > 1 else None
+        elif isinstance(val, dict):
+            name = next((val[k] for k in name_keys if val.get(k)), None)
+            rar = val.get("rarity")
+        else:
+            name = val
+        if name:
+            db.names[int(sid)] = str(name)
+        if isinstance(rar, int):
+            db.rarity[int(sid)] = rar
+
+    for path in paths:
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Nomi skill: impossibile leggere {path}: {e}", file=sys.stderr)
+            continue
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if str(k).isdigit():
+                    add(k, v)
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and item.get("id", item.get("skill_id")) is not None:
+                    add(item.get("id", item.get("skill_id")), item)
+    return db
+
+
+def build_skill_db(names_raw: dict, data_raw: dict) -> dict:
+    """Unisce skillnames.json e skill_data.json di uma-tools nel formato {id: [nome, rarita']}."""
+    out = {
+        "_fonte": "https://github.com/alpha123/uma-tools (umalator-global: skillnames.json + skill_data.json), "
+                  "testi del client Global",
+        "_formato": "id -> [nome, rarita'] con rarita' 1 = bianca, 2 = oro, 3-5 = unica",
+    }
+    for k in sorted((k for k in names_raw if str(k).isdigit()), key=int):
+        v = names_raw[k]
+        name = v[0] if isinstance(v, list) and v else v
+        rar = (data_raw.get(k) or {}).get("rarity") if isinstance(data_raw, dict) else None
+        out[k] = [name, rar]
     return out
+
+
+def update_skill_db(path: str = SKILL_DB_FILE) -> int:
+    """Scarica la versione aggiornata dei nomi delle skill e la salva in `path`."""
+    import urllib.request
+
+    def get(name):
+        with urllib.request.urlopen(SKILL_SRC_BASE + name, timeout=60) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    db = build_skill_db(get("skillnames.json"), get("skill_data.json"))
+    write_skill_db(db, path)
+    return sum(1 for k in db if k.isdigit())
+
+
+def write_skill_db(db: dict, path: str) -> None:
+    """Una skill per riga, cosi' il file resta leggibile e modificabile a mano."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{\n" + ",\n".join(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in db.items())
+                + "\n}\n")
 
 
 def find_files(paths: List[str]) -> List[str]:
@@ -1381,6 +1473,8 @@ def find_files(paths: List[str]) -> List[str]:
     seen, out = set(), []
     for f in files:
         k = os.path.abspath(f)
+        if os.path.basename(f) == os.path.basename(SKILL_DB_FILE):
+            continue
         if k not in seen:
             seen.add(k)
             out.append(f)
@@ -1398,8 +1492,21 @@ def main(argv=None) -> int:
     ap.add_argument("--skill", action="store_true", help="tabella completa delle skill per ogni uma")
     ap.add_argument("--md", metavar="FILE", help="salva il report in Markdown")
     ap.add_argument("--csv", metavar="CARTELLA", help="esporta i dati in CSV (per Excel/Sheets)")
-    ap.add_argument("--nomi-skill", metavar="FILE", help="JSON con i nomi delle skill (id -> nome)")
+    ap.add_argument("--nomi-skill", metavar="FILE",
+                    help="JSON aggiuntivo con i nomi delle skill (id -> nome), ha la precedenza su skill_names.json")
+    ap.add_argument("--aggiorna-nomi", action="store_true",
+                    help="scarica i nomi aggiornati delle skill in skill_names.json (serve internet)")
     args = ap.parse_args(argv)
+
+    if args.aggiorna_nomi:
+        try:
+            n = update_skill_db()
+            print(f"Nomi skill aggiornati: {n} skill salvate in {SKILL_DB_FILE}")
+        except Exception as e:  # rete assente, URL cambiato, ...
+            print(f"Aggiornamento dei nomi non riuscito: {e}", file=sys.stderr)
+            return 1
+        if not args.percorsi and not os.path.isdir("data"):
+            return 0
 
     files = find_files(args.percorsi)
     sessions = []
@@ -1412,17 +1519,17 @@ def main(argv=None) -> int:
         print("Nessun file di Team Trials valido trovato. Passa i file .json o una cartella.", file=sys.stderr)
         return 1
     sessions.sort(key=lambda s: s.label)
-    names = load_skill_names(args.nomi_skill)
+    skills = load_skill_db(SKILL_DB_FILE, args.nomi_skill)
 
     args.md_mode = False
-    print(build_report(sessions, args, names), end="")
+    print(build_report(sessions, args, skills), end="")
     if args.md:
         args.md_mode = True
         with open(args.md, "w", encoding="utf-8") as f:
-            f.write(build_report(sessions, args, names))
+            f.write(build_report(sessions, args, skills))
         print(f"\nReport Markdown salvato in {args.md}")
     if args.csv:
-        for p in export_csv(sessions, args.csv):
+        for p in export_csv(sessions, args.csv, skills):
             print(f"CSV: {p}")
     return 0
 

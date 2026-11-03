@@ -24,12 +24,20 @@ python3 tt_stats.py data/ --dettaglio            # resoconto gara per gara
 python3 tt_stats.py data/ --skill                # tabella completa delle skill di ogni uma
 python3 tt_stats.py data/ --md report.md         # salva anche in Markdown
 python3 tt_stats.py data/ --csv export/          # esporta i dati in CSV per Excel/Sheets
-python3 tt_stats.py data/ --nomi-skill skills.json   # mostra i nomi delle skill
+python3 tt_stats.py --aggiorna-nomi              # scarica i nomi delle skill uscite di recente
 ```
 
-`--nomi-skill` accetta un JSON `{"200012": "Nome skill", ...}` oppure una lista
-`[{"id": 200012, "name_en": "Nome skill"}, ...]`. Senza questo file le skill sono indicate
-con il loro ID, che puoi cercare su GameTora.
+## Nomi delle skill
+
+I nomi (versione Global) e la rarità delle skill (bianca, oro, unica) sono in
+`skill_names.json`, accanto allo script, una skill per riga: `"200432": ["Focus", 1]`.
+I dati vengono dal progetto [alpha123/uma-tools](https://github.com/alpha123/uma-tools)
+(`umalator-global/skillnames.json` e `skill_data.json`), estratti dai testi del client Global.
+
+- Quando escono skill nuove, `python3 tt_stats.py --aggiorna-nomi` scarica di nuovo il file.
+  Le skill senza nome compaiono con il loro ID e il report lo segnala.
+- `--nomi-skill FILE.json` aggiunge o sostituisce dei nomi, ad esempio per tradurli. Accetta
+  `{"200012": "Nome"}`, `{"200012": ["Nome", 1]}` oppure `[{"id": 200012, "name_en": "Nome"}]`.
 
 ## Cosa contiene il report
 
@@ -45,7 +53,7 @@ con il loro ID, che puoi cercare su GameTora.
 | Statistiche e attitudini | Statistiche, attitudini, probabilità teoriche di attivazione skill e di rushed (da WIT), umore |
 | Noi contro gli avversari | Statistiche medie a confronto per distanza e chi ha vinto le gare perse |
 | Fattori casuali | Effetto dell'umore e frequenza delle partenze perfette |
-| Skill | Attivazioni e punti per skill, skill mai attivate |
+| Skill | Attivazioni e punti per skill (con nome e tipo), skill mai attivate |
 | Cosa migliorare | Elenco completo delle priorità, con stima del guadagno |
 
 ## Come si calcola il punteggio (ricavato dai dati)
