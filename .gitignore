@@ -1,4 +1,4 @@
-# dati personali delle sessioni e output generati
+# personal session data and generated output
 data/
 export/
 *.json

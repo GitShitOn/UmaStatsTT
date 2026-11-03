@@ -1,16 +1,17 @@
-/* UmaStatsTT - interfaccia della webapp. L'analisi e' in engine.js; qui solo caricamento file e disegno. */
+/* UmaStatsTT - web app interface. The analysis lives in engine.js; this file loads files and draws the page. */
 (function () {
   'use strict';
 
   const E = window.UmaEngine;
-  const { fi, ff, pct } = E;
+  const { fi, ff, pct, ordinal, plural } = E;
   const STORE_KEY = 'umastats.files.v1';
   const SRC_KEYS = [
-    ['place', 'Piazzamento', 'src-place'],
-    ['skill', 'Skill', 'src-skill'],
-    ['pos', 'Partenza e 1ª del suo stile', 'src-pos'],
-    ['other', 'Margine, sorpresa, tempo', 'src-other'],
+    ['place', 'Finishing position', 'src-place'],
+    ['skill', 'Skills', 'src-skill'],
+    ['pos', 'Start and leading own strategy', 'src-pos'],
+    ['other', 'Margin, upset, time', 'src-other'],
   ];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
   const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false };
@@ -18,7 +19,7 @@
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  // ------------------------------------------------------------ archiviazione locale
+  // ------------------------------------------------------------ local storage
 
   function saveFiles() {
     if (state.source !== 'user' && state.source !== 'saved') return true;
@@ -39,10 +40,10 @@
     }
   }
   function clearSaved() {
-    try { localStorage.removeItem(STORE_KEY); } catch (e) { /* archiviazione non disponibile */ }
+    try { localStorage.removeItem(STORE_KEY); } catch (e) { /* storage not available */ }
   }
 
-  // ------------------------------------------------------------ caricamento
+  // ------------------------------------------------------------ loading
 
   async function readFiles(list) {
     const incoming = [];
@@ -53,7 +54,7 @@
       try {
         data = JSON.parse(await f.text());
       } catch (e) {
-        state.errors.push(`${f.name}: non è un file JSON valido.`);
+        state.errors.push(`${f.name}: not a valid JSON file.`);
         continue;
       }
       const tt = E.isTeamTrialsFile(data) ? data : (data && E.isTeamTrialsFile(data.data) ? data.data : null);
@@ -61,8 +62,8 @@
         incoming.push({ name: f.name, data: E.slimFile(tt) });
       } else {
         const n = skills.merge(data);
-        if (n) state.messages.push(`${f.name}: caricati ${fi(n)} nomi di skill.`);
-        else state.errors.push(`${f.name}: non contiene risultati di Team Trials.`);
+        if (n) state.messages.push(`${f.name}: loaded ${fi(n)} skill names.`);
+        else state.errors.push(`${f.name}: contains no Team Trials results.`);
       }
     }
     if (incoming.length) {
@@ -74,7 +75,7 @@
     }
     await rebuild();
     if (incoming.length && !saveFiles()) {
-      state.messages.push('I file non sono stati ricordati su questo dispositivo: spazio esaurito o archiviazione bloccata. Al prossimo accesso andranno ricaricati.');
+      state.messages.push('The files could not be remembered on this device (storage full or blocked). You will need to load them again next time.');
       renderStatus();
     }
   }
@@ -112,13 +113,13 @@
     if (!window.UMA_DEMO || !window.UMA_DEMO.files) return;
     state.files = window.UMA_DEMO.files;
     state.source = 'demo';
-    state.demoLabel = window.UMA_DEMO.label || 'dati di esempio';
+    state.demoLabel = window.UMA_DEMO.label || 'sample data';
     state.errors = [];
     state.messages = [];
     rebuild();
   }
 
-  // ------------------------------------------------------------ utilità di disegno
+  // ------------------------------------------------------------ drawing helpers
 
   function niceScale(maxV, ticks = 4) {
     if (!(maxV > 0)) return { max: 1, step: 1 };
@@ -134,54 +135,54 @@
   }
   function shortLabel(label) {
     const m = /^\d{4}-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(label);
-    return m ? `${m[2]}/${m[1]} ${m[3]}:${m[4]}` : label;
+    return m ? `${MONTHS[Number(m[1]) - 1] || m[1]} ${Number(m[2])}, ${m[3]}:${m[4]}` : label;
   }
   const tipAttr = (v, l, x) => `data-tip-v="${esc(v)}" data-tip-l="${esc(l || '')}" data-tip-x="${esc(x || '')}"`;
   const distChip = (dt, name) => `<span class="chip d${esc(dt)}"><i aria-hidden="true"></i>${esc(name)}</span>`;
   const posBadge = (p) => {
     const cls = p === 1 ? 'p1' : p <= 3 ? 'p2' : p <= 5 ? 'p4' : 'p6';
-    return `<span class="pos ${cls}" title="${p}ª">${p}</span>`;
+    return `<span class="pos ${cls}" title="${ordinal(p)}">${p}</span>`;
   };
-  const posRow = (arr) => `<span class="posrow" aria-label="Arrivi: ${arr.join(', ')}">${arr.map(posBadge).join('')}</span>`;
+  const posRow = (arr) => `<span class="posrow" aria-label="Finishes: ${arr.join(', ')}">${arr.map(posBadge).join('')}</span>`;
   const flagRate = (k, n, warnAt, badAt) => {
     if (!k) return `${k}/${n}`;
     const r = k / n;
     const cls = r >= badAt ? 'bad' : r >= warnAt ? '' : null;
     return cls === null ? `${k}/${n}` : `<span class="flag ${cls}">${k}/${n}</span>`;
   };
-  const umaTag = (u) => (!u.current ? ' <span class="tag ex">ex</span>' : u.slot === 1 ? ' <span class="tag">1ª</span>' : '');
+  const umaTag = (u) => (!u.current ? ' <span class="tag ex">former</span>' : u.slot === 1 ? ' <span class="tag">1st</span>' : '');
   const tile = (label, value, sub) => `<div class="tile"><span class="tile-label">${esc(label)}</span><span class="tile-value">${esc(value)}</span>${sub ? `<span class="tile-sub">${esc(sub)}</span>` : ''}</div>`;
   const sectionHead = (id, eyebrow, title, intro) => `<div class="section-head"><p class="eyebrow">${esc(eyebrow)}</p><h2 id="h-${id}">${esc(title)}</h2>${intro ? `<p>${intro}</p>` : ''}</div>`;
   const noteFlags = (notes) => (notes.length ? `<span class="noteline">${notes.map((x) => `<span class="flag ${x.s === 'bad' ? 'bad' : x.s === 'good' ? 'good' : ''}">${esc(x.t)}</span>`).join('')}</span>` : '');
 
   function actionList(items, max) {
     return `<ol class="actions">${items.map((r) => `<li class="action">
-      <div class="action-gain"><strong>~${fi(r.gain)}</strong><div class="meter" aria-hidden="true"><i style="width:${Math.max(2, (r.gain / max) * 100).toFixed(1)}%"></i></div><span>punti finali a sessione</span></div>
+      <div class="action-gain"><strong>~${fi(r.gain)}</strong><div class="meter" aria-hidden="true"><i style="width:${Math.max(2, (r.gain / max) * 100).toFixed(1)}%"></i></div><span>final points per session</span></div>
       <p class="action-text">${esc(r.text)}</p></li>`).join('')}</ol>`;
   }
   function noteList(items) {
     return `<ul class="actions">${items.map((n) => `<li class="action note-item"><span class="flag-icon" aria-hidden="true">!</span><p class="action-text">${esc(n.text)}</p></li>`).join('')}</ul>`;
   }
 
-  // ------------------------------------------------------------ sezioni
+  // ------------------------------------------------------------ sections
 
   function secSummary(A) {
     const top = A.recs.est.slice(0, 5);
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
     const apt = A.recs.notes.filter((n) => n.prio === 1);
-    return `<section class="section" id="sintesi" aria-labelledby="h-sintesi">
-      ${sectionHead('sintesi', 'Sintesi', 'Il quadro in breve')}
+    return `<section class="section" id="summary" aria-labelledby="h-summary">
+      ${sectionHead('summary', 'Summary', 'The big picture')}
       <div class="tiles">
-        ${tile('Punti medi a sessione', fi(A.totalAvg), `${A.nSessions} ${A.nSessions === 1 ? 'sessione' : 'sessioni'}`)}
-        ${tile('Punti medi a gara', fi(A.raceAvg), `${A.nRaces} gare`)}
-        ${tile('Gare vinte', `${A.wins} su ${A.nRaces}`, pct(A.wins / A.nRaces))}
-        ${tile('1 punto base vale', `${ff(A.mult, 2)} finali`, `${ff(A.mult + 0.1, 2)} per la prima uma della distanza`)}
+        ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}`)}
+        ${tile('Average points per race', fi(A.raceAvg), `${A.nRaces} races`)}
+        ${tile('Races won', `${A.wins} of ${A.nRaces}`, pct(A.wins / A.nRaces))}
+        ${tile('1 base point is worth', `${ff(A.mult, 2)} final`, `${ff(A.mult + 0.1, 2)} for the first uma of the distance`)}
       </div>
-      <div class="panel"><h3>Punteggio per sessione</h3>${sessionChart(A)}</div>
-      <div class="section-head"><h3>Le 5 cose che valgono di più</h3><p class="note">Stima dei punti finali in più a sessione. L'elenco completo è in «Cosa migliorare».</p></div>
+      <div class="panel"><h3>Score by session</h3>${sessionChart(A)}</div>
+      <div class="section-head"><h3>The 5 things worth the most</h3><p class="note">Estimated extra final points per session. The full list is under “What to improve”.</p></div>
       ${actionList(top, max)}
-      ${apt.length ? `<div class="section-head"><h3>Attitudini sotto A</h3></div>${noteList(apt)}` : ''}
-      ${A.changes.length ? `<p class="note">La squadra è cambiata in ${A.changes.length} ${A.changes.length === 1 ? 'sessione' : 'sessioni'}: i consigli riguardano la squadra attuale, quella dell'ultima sessione (${esc(A.latest)}). Le uma uscite restano nelle statistiche con il segno «ex». <a href="#cambi">Vedi i cambi</a>.</p>` : ''}
+      ${apt.length ? `<div class="section-head"><h3>Aptitudes below A</h3></div>${noteList(apt)}` : ''}
+      ${A.changes.length ? `<p class="note">The team changed in ${A.changes.length} ${plural(A.changes.length, 'session', 'sessions')}: the advice covers the current team, the one in the latest session (${esc(A.latest)}). Umas that left stay in the statistics marked “former”. <a href="#changes">See the changes</a>.</p>` : ''}
     </section>`;
   }
 
@@ -194,14 +195,14 @@
     }
     const best = ss.reduce((a, b) => (b.total > a.total ? b : a));
     const every = Math.ceil(ss.length / 8);
-    const cols = ss.map((s) => `<div class="col" tabindex="0" style="--h:${((s.total / max) * 100).toFixed(2)}%" ${tipAttr(fi(s.total), `${s.label} · ${s.wins} vinte su ${s.n}`, `${fi(s.perRace)} a gara · bonus avversario ${pct(s.oppRate, 1)}`)}>
+    const cols = ss.map((s) => `<div class="col" tabindex="0" style="--h:${((s.total / max) * 100).toFixed(2)}%" ${tipAttr(fi(s.total), `${s.label} · ${s.wins} won of ${s.n}`, `${fi(s.perRace)} per race · opponent bonus ${pct(s.oppRate, 1)}`)}>
         ${ss.length <= 8 || s === best ? `<span class="cap${s === best ? ' keep' : ''}">${fi(s.total)}</span>` : ''}<i class="bar"></i></div>`).join('');
     const labels = ss.map((s, i) => `<div>${i % every === 0 ? `<span>${esc(shortLabel(s.label))}</span>` : '<span>&nbsp;</span>'}
-        ${ss.length <= 12 ? `<span class="wl" aria-label="${s.wins} vinte, ${s.n - s.wins} perse">${s.results.map((w) => `<b class="${w ? 'w' : ''}"></b>`).join('')}</span>` : ''}</div>`).join('');
-    return `<div class="colchart" role="img" aria-label="Punteggio totale per sessione">
+        ${ss.length <= 12 ? `<span class="wl" aria-label="${s.wins} won, ${s.n - s.wins} lost">${s.results.map((w) => `<b class="${w ? 'w' : ''}"></b>`).join('')}</span>` : ''}</div>`).join('');
+    return `<div class="colchart" role="img" aria-label="Total score by session">
       <div class="colchart-plot">${grid.join('')}<div class="cols">${cols}</div></div>
       <div class="col-labels">${labels}</div></div>
-      ${ss.length <= 12 ? '<p class="note">Sotto ogni colonna le gare della sessione in ordine: pallino pieno = vinta, vuoto = persa.</p>' : ''}`;
+      ${ss.length <= 12 ? '<p class="note">Under each column, the session’s races in order: filled dot = won, empty dot = lost.</p>' : ''}`;
   }
 
   function secScoring(A) {
@@ -211,7 +212,7 @@
         <td class="first">${esc(c.label)}</td>
         <td class="n">${unit(c)}</td>
         <td class="n">${c.hits}/${c.denom}</td>
-        <td><div class="barcell"><div class="track">${c.perRace > 0 ? `<i style="width:${((c.perRace / maxPR) * 100).toFixed(2)}%" ${tipAttr(fi(c.perRace), c.label, `${pct(c.share, 1)} del totale`)}></i>` : ''}</div><span class="v">${fi(c.perRace)}</span></div></td>
+        <td><div class="barcell"><div class="track">${c.perRace > 0 ? `<i style="width:${((c.perRace / maxPR) * 100).toFixed(2)}%" ${tipAttr(fi(c.perRace), c.label, `${pct(c.share, 1)} of the total`)}></i>` : ''}</div><span class="v">${fi(c.perRace)}</span></div></td>
         <td class="n">${pct(c.share, 1)}</td></tr>`).join('');
     const bonus = A.bonuses.map((b) => {
       const v = b.cfg ? b.cfg.map((x) => `+${pct(x, 2)}`).join(', ') : (b.max - b.min > 0.002 ? `+${pct(b.min, 1)} … +${pct(b.max, 1)}` : `+${pct(b.mean, 1)}`);
@@ -219,20 +220,20 @@
     }).join('');
     const moods = A.moods.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${m.n}</td><td class="n">${ff(m.avgFinish, 1)}</td><td class="n">${fi(m.avgRaw)}</td></tr>`).join('');
     const st = A.starts;
-    return `<section class="section" id="punteggio" aria-labelledby="h-punteggio">
-      ${sectionHead('punteggio', 'Punteggio', 'Da dove arrivano i punti', 'Ogni evento in gara vale dei <strong>punti base</strong>; poi tutti i bonus percentuali li moltiplicano. Per salire conta aumentare i punti base.')}
-      <div class="panel"><h3>Bonus percentuali osservati</h3><div class="kv">${bonus}</div>
-        <p class="note" style="margin-top:8px">Punteggio di gara = punti base × (1 + bonus) di ogni evento, più il bonus squadra. In media 1 punto base vale ${ff(A.mult, 2)} punti finali.</p></div>
+    return `<section class="section" id="scoring" aria-labelledby="h-scoring">
+      ${sectionHead('scoring', 'Scoring', 'Where the points come from', 'Every race event is worth <strong>base points</strong>; then every percentage bonus multiplies them. To go up, raise your base points.')}
+      <div class="panel"><h3>Percentage bonuses seen</h3><div class="kv">${bonus}</div>
+        <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} final points.</p></div>
       <div class="table-wrap"><table>
-        <thead><tr><th class="first">Voce</th><th class="n">Punti base per evento</th><th class="n">Presente</th><th>Punti finali per gara</th><th class="n">Quota</th></tr></thead>
+        <thead><tr><th class="first">Item</th><th class="n">Base points per event</th><th class="n">Present</th><th>Final points per race</th><th class="n">Share</th></tr></thead>
         <tbody>${rows}</tbody>
-        <tfoot><tr><th class="first">Totale</th><th></th><th></th><th><div class="barcell"><span class="track"></span><span class="v">${fi(A.raceAvg)}</span></div></th><th class="n">100%</th></tr></tfoot>
+        <tfoot><tr><th class="first">Total</th><th></th><th></th><th><div class="barcell"><span class="track"></span><span class="v">${fi(A.raceAvg)}</span></div></th><th class="n">100%</th></tr></tfoot>
       </table></div>
-      <p class="note">«Presente» = in quante uma-gare compare la voce (per il bonus squadra: in quante gare).</p>
+      <p class="note">“Present” = in how many runs (one uma in one race) the item shows up; for the team bonus, in how many races.</p>
       <div class="grid-2">
-        <div class="panel"><h3>Umore</h3><div class="table-wrap"><table>
-          <thead><tr><th>Umore</th><th class="n">Uma-gare</th><th class="n">Piazz. medio</th><th class="n">Base medi</th></tr></thead><tbody>${moods}</tbody></table></div></div>
-        <div class="panel"><h3>Partenze</h3>${st.total ? `<p class="tile-value">${st.perfect}/${st.total}</p><p class="note">Partenze perfette (ritardo sotto 0,02 s): ${pct(st.perfect / st.total)}. Ritardo medio ${ff(st.mean, 3)} s. Senza skill di partenza ci si aspetta circa il 20%.</p>` : '<p class="note">Il replay non è disponibile in questo browser.</p>'}</div>
+        <div class="panel"><h3>Mood</h3><div class="table-wrap"><table>
+          <thead><tr><th>Mood</th><th class="n">Runs</th><th class="n">Avg place</th><th class="n">Avg base</th></tr></thead><tbody>${moods}</tbody></table></div></div>
+        <div class="panel"><h3>Starts</h3>${st.total ? `<p class="tile-value">${st.perfect}/${st.total}</p><p class="note">Perfect starts (delay under 0.02 s): ${pct(st.perfect / st.total)}. Average delay ${ff(st.mean, 3)} s. Without start skills you can expect about 20%.</p>` : '<p class="note">The replay cannot be read in this browser.</p>'}</div>
       </div>
     </section>`;
   }
@@ -244,17 +245,17 @@
       <td>${d.courses.map((c) => `${fi(c)} m`).join(', ') || '–'}</td>
       <td class="n">${d.races}</td>
       <td class="n">${d.wins}-${d.races - d.wins}</td>
-      <td><div class="barcell"><div class="track"><i class="d${d.dt}" style="width:${((d.avgTotal / maxT) * 100).toFixed(2)}%;background:var(--c)" ${tipAttr(fi(d.avgTotal), `${d.name} · punti medi a gara`, `${d.wins} vinte su ${d.races}`)}></i></div><span class="v">${fi(d.avgTotal)}</span></div></td>
+      <td><div class="barcell"><div class="track"><i class="d${d.dt}" style="width:${((d.avgTotal / maxT) * 100).toFixed(2)}%;background:var(--c)" ${tipAttr(fi(d.avgTotal), `${d.name} · average points per race`, `${d.wins} won of ${d.races}`)}></i></div><span class="v">${fi(d.avgTotal)}</span></div></td>
       <td class="n">${ff(d.avgFinish, 1)}</td>
       <td class="n">${d.teamBonus}/${d.races}</td>
       <td class="n">${d.ourFirst}/${d.races}</td></tr>`).join('');
     const cons = A.consistent === A.nRaces
-      ? `In tutte le ${A.nRaces} gare ha vinto la squadra che ha piazzato un'uma al 1° posto.`
-      : `La vittoria è andata alla squadra con la 1ª classificata in ${A.consistent} gare su ${A.nRaces}.`;
-    return `<section class="section" id="distanze" aria-labelledby="h-distanze">
-      ${sectionHead('distanze', 'Distanze', 'Come vai in ogni categoria')}
+      ? `In all ${A.nRaces} races, the team with the 1st-place uma won the race.`
+      : `The race went to the team with the 1st-place uma in ${A.consistent} of ${A.nRaces} races.`;
+    return `<section class="section" id="distances" aria-labelledby="h-distances">
+      ${sectionHead('distances', 'Distances', 'How you do in each category')}
       <div class="table-wrap"><table>
-        <thead><tr><th class="first">Distanza</th><th>Percorsi</th><th class="n">Gare</th><th class="n">V-S</th><th>Punti medi a gara</th><th class="n">Piazz. medio</th><th class="n">Bonus squadra</th><th class="n">1° posto nostro</th></tr></thead>
+        <thead><tr><th class="first">Distance</th><th>Courses</th><th class="n">Races</th><th class="n">W-L</th><th>Average points per race</th><th class="n">Avg place</th><th class="n">Team bonus</th><th class="n">Our 1st place</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
       <p class="note">${esc(cons)}</p>
     </section>`;
@@ -270,16 +271,16 @@
         html += `<div class="stack-group">${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</div>`;
         lastDist = u.mainDist;
       }
-      const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'punti base medi a gara')}></i>`).join('');
+      const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'average base points per race')}></i>`).join('');
       const rushed = u.src.rushed ? ` · rushed ${fi(u.src.rushed)}` : '';
       html += `<div class="stack-row${u.current ? '' : ' ex'}"><div class="stack-name" title="${esc(u.label)}">${esc(u.name)}${umaTag(u)}</div>
-        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} punti base medi a gara${rushed}`)}">${segs}</div></div>
-        <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · punti base medi a gara`, u.src.rushed ? `di cui rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
+        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} average base points per race${rushed}`)}">${segs}</div></div>
+        <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · average base points per race`, u.src.rushed ? `including rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
     });
     const ticks = [];
     for (let v = 0; v <= max + 1e-6; v += step) ticks.push(`<span style="left:${((v / max) * 100).toFixed(2)}%">${compact(v)}</span>`);
     html += `<div class="axis-row"><div class="axis-spacer"></div><div class="axis">${ticks.join('')}</div><div></div></div></div>
-      <p class="note">Il numero a destra è il totale netto a gara, penalità per rushed comprese.</p>`;
+      <p class="note">The number on the right is the net total per race, rushed penalties included.</p>`;
     return html;
   }
 
@@ -305,37 +306,37 @@
         <td class="n">${pct(d.blocked)}</td></tr>`;
     }).join('');
     return `<div class="table-wrap"><table>
-      <thead><tr><th class="first">Uma</th><th>Arrivi</th><th class="n">Base/gara</th><th class="n">Bianche/gara</th><th class="n">Oro/gara</th><th class="n">Unica</th><th class="n">Partenza perfetta</th><th class="n">1ª stile 1/6</th><th class="n">1ª stile 2/3</th><th class="n">Rushed</th><th class="n">HP finita</th><th class="n">Sprint in ritardo</th><th class="n">HP all'arrivo</th><th class="n">Bloccata</th></tr></thead>
+      <thead><tr><th class="first">Uma</th><th>Finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <p class="note">Unica = gare in cui la skill unica si è attivata (L = livello). HP finita = HP a zero più di 10 m prima del traguardo. Sprint in ritardo = sprint finale partito più di 10 m dopo i 2/3 di gara, segno di stamina insufficiente. Bloccata = quota di tempo con un'uma davanti che chiude la strada nell'ultimo terzo.</p>`;
+      <p class="note">Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
 
   function umaCard(u) {
     const style = E.STYLE_NAMES[u.style] || '?';
     const statCells = E.STAT_KEYS.map(([k, l]) => `<div class="stat"><span>${l}</span><b>${fi(u.stats[k])}</b></div>`).join('');
     const apt = (v) => esc(E.APT[v] || '?');
-    const races = u.races.map((r) => `<tr><td>${esc(shortLabel(r.session))} · G${r.rnd}</td><td>${r.distance ? `${fi(r.distance)} m` : '–'}</td><td>${posBadge(r.finish)}</td><td class="n">${r.popularity}</td><td>${esc(r.mood)}</td><td class="n">${fi(r.raw)}</td><td class="n">${fi(r.final)}</td><td class="n">${r.white}/${r.gold}/${r.unique}</td><td class="wrap">${noteFlags(r.notes)}</td></tr>`).join('');
-    const sk = u.skills.map((s) => `<tr><td class="wrap">${esc(s.name || '?')}${s.acts ? '' : ' <span class="flag">mai</span>'}</td><td class="n muted">${s.id}</td><td>${esc(s.kind)}</td><td class="n">L${s.level}</td><td class="n">${s.acts}/${u.n}</td><td class="n">${fi(s.points)}</td></tr>`).join('');
-    const tag = !u.current ? ' <span class="tag ex">non più in squadra</span>' : u.slot === 1 ? ' <span class="tag">prima uma</span>' : '';
+    const races = u.races.map((r) => `<tr><td>${esc(shortLabel(r.session))} · R${r.rnd}</td><td>${r.distance ? `${fi(r.distance)} m` : '–'}</td><td>${posBadge(r.finish)}</td><td class="n">${r.popularity}</td><td>${esc(r.mood)}</td><td class="n">${fi(r.raw)}</td><td class="n">${fi(r.final)}</td><td class="n">${r.white}/${r.gold}/${r.unique}</td><td class="wrap">${noteFlags(r.notes)}</td></tr>`).join('');
+    const sk = u.skills.map((s) => `<tr><td class="wrap">${esc(s.name || '?')}${s.acts ? '' : ' <span class="flag">never</span>'}</td><td class="n muted">${s.id}</td><td>${esc(s.kind)}</td><td class="n">L${s.level}</td><td class="n">${s.acts}/${u.n}</td><td class="n">${fi(s.points)}</td></tr>`).join('');
+    const tag = !u.current ? ' <span class="tag ex">no longer on the team</span>' : u.slot === 1 ? ' <span class="tag">first uma</span>' : '';
     return `<details class="card${u.current ? '' : ' ex'}" id="uma-${esc(u.key)}">
       <summary>
         <span class="card-title"><strong>${esc(u.name)}</strong><span>${distChip(u.mainDist, u.distLabel)} ${esc(style)}${tag}</span></span>
         ${posRow(u.finishes)}
-        <span class="card-score"><b>${fi(u.avgRaw)} base</b>${fi(u.avgFinal)} finali a gara</span>
+        <span class="card-score"><b>${fi(u.avgRaw)} base</b>${fi(u.avgFinal)} final per race</span>
       </summary>
       <div class="card-body">
         <div class="stats">${statCells}</div>
         <div class="kv">
-          <span>Attitudini: distanza <b>${apt(u.apt.dist)}</b> · terreno <b>${apt(u.apt.ground)}</b> · stile <b>${apt(u.apt.style)}</b></span>
-          <span>Attivazione skill teorica <b>${pct(u.skillChance)}</b></span>
-          <span>Rushed teorico <b>${pct(u.rushedChance)}</b></span>
-          ${u.diag.uniqueName ? `<span>Unica: <b>${esc(u.diag.uniqueName)}</b> ${u.diag.uniqueK}/${u.n}</span>` : ''}
+          <span>Aptitudes: distance <b>${apt(u.apt.dist)}</b> · track <b>${apt(u.apt.ground)}</b> · strategy <b>${apt(u.apt.style)}</b></span>
+          <span>Theoretical skill activation <b>${pct(u.skillChance)}</b></span>
+          <span>Theoretical rushed risk <b>${pct(u.rushedChance)}</b></span>
+          ${u.diag.uniqueName ? `<span>Unique: <b>${esc(u.diag.uniqueName)}</b> ${u.diag.uniqueK}/${u.n}</span>` : ''}
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Gara</th><th>Percorso</th><th>Arrivo</th><th class="n">Pop.</th><th>Umore</th><th class="n">Base</th><th class="n">Finali</th><th class="n">Skill b/o/u</th><th>Note</th></tr></thead>
+          <thead><tr><th>Race</th><th>Course</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
           <tbody>${races}</tbody></table></div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Skill</th><th class="n">ID</th><th>Tipo</th><th class="n">Liv.</th><th class="n">Attivazioni</th><th class="n">Punti base</th></tr></thead>
+          <thead><tr><th>Skill</th><th class="n">ID</th><th>Kind</th><th class="n">Lvl</th><th class="n">Activations</th><th class="n">Base points</th></tr></thead>
           <tbody>${sk}</tbody></table></div>
       </div></details>`;
   }
@@ -344,23 +345,23 @@
     if (!A.changes.length) return '';
     const items = A.changes.map((c) => {
       const parts = [];
-      if (c.entered.length) parts.push(`<b>entrano</b> ${esc(c.entered.join(', '))}`);
-      if (c.left.length) parts.push(`<b>escono</b> ${esc(c.left.join(', '))}`);
-      if (c.moved.length) parts.push(`<b>spostate</b> ${esc(c.moved.join(', '))}`);
+      if (c.entered.length) parts.push(`<b>in</b> ${esc(c.entered.join(', '))}`);
+      if (c.left.length) parts.push(`<b>out</b> ${esc(c.left.join(', '))}`);
+      if (c.moved.length) parts.push(`<b>moved</b> ${esc(c.moved.join(', '))}`);
       return `<li><span class="muted">${esc(shortLabel(c.session))}</span> ${parts.join('; ')}</li>`;
     }).join('');
-    return `<div class="panel" id="cambi"><h3>Cambi di squadra</h3><ul class="changes">${items}</ul>
-      <p class="note">Le uma uscite restano nelle statistiche, segnate «ex» e più chiare; i consigli guardano solo la squadra attuale.</p></div>`;
+    return `<div class="panel" id="changes"><h3>Team changes</h3><ul class="changes">${items}</ul>
+      <p class="note">Umas that left stay in the statistics, marked “former” and faded; the advice only looks at the current team.</p></div>`;
   }
 
   function secUmas(A) {
-    return `<section class="section" id="uma" aria-labelledby="h-uma">
-      ${sectionHead('uma', 'Uma', 'Rendimento di ogni uma', 'Punti base medi a gara divisi per fonte. Tocca una barra per il dettaglio, apri una scheda per gare e skill.')}
+    return `<section class="section" id="umas" aria-labelledby="h-umas">
+      ${sectionHead('umas', 'Umas', 'How each uma performs', 'Average base points per race, split by source. Tap a bar for details, open a card for races and skills.')}
       ${teamChangesPanel(A)}
       <div class="panel">${umaStack(A)}</div>
-      <div class="section-head"><h3>Diagnostica</h3></div>
+      <div class="section-head"><h3>Diagnostics</h3></div>
       ${diagTable(A)}
-      <div class="section-head"><h3>Schede</h3></div>
+      <div class="section-head"><h3>Cards</h3></div>
       <div class="uma-list">${A.umas.map(umaCard).join('')}</div>
     </section>`;
   }
@@ -374,22 +375,22 @@
           if (s.diff == null) return '<td class="h">–</td>';
           const w = Math.min(1, Math.abs(s.diff) / maxAbs[s.key]) * 62;
           const bg = `color-mix(in oklab, var(${s.diff >= 0 ? '--div-pos' : '--div-neg'}) ${w.toFixed(0)}%, var(--div-mid))`;
-          return `<td class="h" style="background:${bg}" ${tipAttr(`${s.diff >= 0 ? '+' : '−'}${fi(Math.abs(s.diff))}`, `${s.label} · ${d.name}`, `noi ${fi(s.ours)}, avversari ${fi(s.opp)}`)}><b>${s.diff >= 0 ? '+' : '−'}${fi(Math.abs(s.diff))}</b><small>${fi(s.ours)} / ${fi(s.opp)}</small></td>`;
+          return `<td class="h" style="background:${bg}" ${tipAttr(`${s.diff >= 0 ? '+' : '−'}${fi(Math.abs(s.diff))}`, `${s.label} · ${d.name}`, `you ${fi(s.ours)}, opponents ${fi(s.opp)}`)}><b>${s.diff >= 0 ? '+' : '−'}${fi(Math.abs(s.diff))}</b><small>${fi(s.ours)} / ${fi(s.opp)}</small></td>`;
         }).join('')}
         <td class="n">${ff(d.avgFinish, 1)} / ${ff(d.oppFinish, 1)}</td></tr>`).join('');
-    const lost = A.lost.map((l) => `<tr><td>${esc(shortLabel(l.session))} · G${l.rnd}</td><td>${esc(l.dist)}${l.distance ? ` ${fi(l.distance)} m` : ''}</td>
-        <td>${l.winner ? `${esc(l.winner.name)} <span class="muted">${esc(l.winner.style)}</span>` : 'uma fuori squadra'}</td>
+    const lost = A.lost.map((l) => `<tr><td>${esc(shortLabel(l.session))} · R${l.rnd}</td><td>${esc(l.dist)}${l.distance ? ` ${fi(l.distance)} m` : ''}</td>
+        <td>${l.winner ? `${esc(l.winner.name)} <span class="muted">${esc(l.winner.style)}</span>` : 'uma outside both teams'}</td>
         ${E.STAT_KEYS.map(([k]) => `<td class="n">${l.winner ? fi(l.winner.stats[k]) : '–'}</td>`).join('')}
         <td>${l.best ? `${esc(l.best.name)} ${posBadge(l.best.finish)}` : '–'}</td></tr>`).join('');
-    return `<section class="section" id="avversari" aria-labelledby="h-avversari">
-      ${sectionHead('avversari', 'Avversari', 'Le tue statistiche contro quelle avversarie', 'Media delle statistiche delle tue 3 uma contro quelle delle 3 avversarie, per distanza. Blu: sei più alto. Rosso: sono più alti gli avversari.')}
-      <div class="div-legend"><span>avversari più alti</span><span class="ramp" aria-hidden="true"></span><span>tu più alto</span></div>
+    return `<section class="section" id="opponents" aria-labelledby="h-opponents">
+      ${sectionHead('opponents', 'Opponents', 'Your stats against your opponents’', 'Average stats of your 3 umas against the 3 opposing umas, by distance. Blue: you are higher. Red: the opponents are higher.')}
+      <div class="div-legend"><span>opponents higher</span><span class="ramp" aria-hidden="true"></span><span>you higher</span></div>
       <div class="table-wrap"><table class="heat">
-        <thead><tr><th class="first">Distanza</th>${E.STAT_KEYS.map(([, l]) => `<th style="text-align:center">${l}<br><span class="muted small">diff · tu / avv.</span></th>`).join('')}<th class="n">Piazz. medio<br><span class="muted small">tu / avv.</span></th></tr></thead>
+        <thead><tr><th class="first">Distance</th>${E.STAT_KEYS.map(([, l]) => `<th style="text-align:center">${l}<br><span class="muted small">diff · you / opp.</span></th>`).join('')}<th class="n">Avg place<br><span class="muted small">you / opp.</span></th></tr></thead>
         <tbody>${rows}</tbody></table></div>
-      ${A.lost.length ? `<div class="section-head"><h3>Chi ha vinto le gare perse</h3></div>
+      ${A.lost.length ? `<div class="section-head"><h3>Who won the races you lost</h3></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Gara</th><th>Distanza</th><th>Vincitrice</th>${E.STAT_KEYS.map(([, l]) => `<th class="n">${l}</th>`).join('')}<th>Tua migliore</th></tr></thead>
+        <thead><tr><th>Race</th><th>Distance</th><th>Winner</th>${E.STAT_KEYS.map(([, l]) => `<th class="n">${l}</th>`).join('')}<th>Your best</th></tr></thead>
         <tbody>${lost}</tbody></table></div>` : ''}
     </section>`;
   }
@@ -397,10 +398,10 @@
   function secSkills(A) {
     const items = A.umas.filter((u) => u.current && u.never.length).map((u) => `<div class="never-item"><strong>${esc(u.name)}</strong>
       <ul>${u.never.map((s) => `<li>${esc(s.name || String(s.id))} <small>${esc(s.kind)}</small></li>`).join('')}</ul></div>`).join('');
-    return `<section class="section" id="skill" aria-labelledby="h-skill">
-      ${sectionHead('skill', 'Skill', 'Skill mai attivate', `Ogni attivazione vale punti base: bianca o unica ereditata 500, oro 1.200, unica 2.300-2.500. Anche le passive contano. Qui sotto le skill della squadra attuale che non si sono mai attivate in nessuna gara; la tabella completa è nella scheda di ogni uma.`)}
-      ${items ? `<div class="panel never-list">${items}</div>` : '<p class="note">Tutte le skill si sono attivate almeno una volta.</p>'}
-      ${A.unnamed.length ? `<p class="note">${A.unnamed.length} skill non hanno un nome nel database: carica un file JSON di nomi (id → nome) per completarle.</p>` : ''}
+    return `<section class="section" id="skills" aria-labelledby="h-skills">
+      ${sectionHead('skills', 'Skills', 'Skills that never fired', 'Every activation is worth base points: white or inherited unique 500, gold 1,200, unique 2,300-2,500. Passive skills count too. Below are the current team’s skills that never fired in any race; the full table is in each uma’s card.')}
+      ${items ? `<div class="panel never-list">${items}</div>` : '<p class="note">Every skill fired at least once.</p>'}
+      ${A.unnamed.length ? `<p class="note">${A.unnamed.length} skills have no name in the database: load a JSON file of names (id → name) to fill them in.</p>` : ''}
     </section>`;
   }
 
@@ -409,48 +410,48 @@
       const wins = s.races.filter((r) => r.win).length;
       const total = s.races.reduce((t, r) => t + r.total, 0);
       const races = s.races.map((r) => {
-        const rows = r.ours.map((u) => `<tr><td class="first">${esc(u.name)}</td><td class="n">${u.slot === 1 ? '<span class="tag">1ª</span>' : u.slot}</td><td>${posBadge(u.finish)}</td><td class="n">${u.popularity}</td><td>${esc(u.mood)}</td><td class="n">${fi(u.raw)}</td><td class="n">${fi(u.final)}</td><td class="n">${u.white}/${u.gold}/${u.unique}</td><td class="wrap">${noteFlags(u.notes)}</td></tr>`).join('')
-          + r.opponents.map((o) => `<tr class="sub"><td class="first">avv. ${esc(o.name)}</td><td class="n">${o.slot}</td><td>${posBadge(o.finish)}</td><td></td><td></td><td></td><td></td><td></td><td>${esc(o.style)}</td></tr>`).join('');
+        const rows = r.ours.map((u) => `<tr><td class="first">${esc(u.name)}</td><td class="n">${u.slot === 1 ? '<span class="tag">1st</span>' : u.slot}</td><td>${posBadge(u.finish)}</td><td class="n">${u.popularity}</td><td>${esc(u.mood)}</td><td class="n">${fi(u.raw)}</td><td class="n">${fi(u.final)}</td><td class="n">${u.white}/${u.gold}/${u.unique}</td><td class="wrap">${noteFlags(u.notes)}</td></tr>`).join('')
+          + r.opponents.map((o) => `<tr class="sub"><td class="first">opp. ${esc(o.name)}</td><td class="n">${o.slot}</td><td>${posBadge(o.finish)}</td><td></td><td></td><td></td><td></td><td></td><td>${esc(o.style)}</td></tr>`).join('');
         return `<details class="card race"><summary>
-            <span class="result${r.win ? ' win' : ''}">${r.win ? 'Vinta' : 'Persa'}</span>
-            <span class="card-title"><strong>G${r.rnd} · ${esc(r.dist)} ${r.distance ? `${fi(r.distance)} m` : ''}</strong><span>${esc(r.weather)}, ${esc(r.ground)}${r.teamFinal ? ` · bonus squadra ${fi(r.teamFinal)}` : ''}</span></span>
+            <span class="result${r.win ? ' win' : ''}">${r.win ? 'Won' : 'Lost'}</span>
+            <span class="card-title"><strong>R${r.rnd} · ${esc(r.dist)} ${r.distance ? `${fi(r.distance)} m` : ''}</strong><span>${esc(r.weather)}, ${esc(r.ground)}${r.teamFinal ? ` · team bonus ${fi(r.teamFinal)}` : ''}</span></span>
             ${posRow(r.ours.map((u) => u.finish))}
-            <span class="card-score"><b>${fi(r.total)}</b>punti</span>
+            <span class="card-score"><b>${fi(r.total)}</b>points</span>
           </summary><div class="card-body"><div class="table-wrap"><table>
-            <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Arrivo</th><th class="n">Pop.</th><th>Umore</th><th class="n">Base</th><th class="n">Finali</th><th class="n">Skill b/o/u</th><th>Note</th></tr></thead>
+            <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
             <tbody>${rows}</tbody></table></div></div></details>`;
       }).join('');
-      return `<div class="session-block"><div class="session-head"><h3>${esc(s.label)}</h3><span class="muted">${fi(total)} punti · ${wins} vinte su ${s.races.length}</span></div>${races}</div>`;
+      return `<div class="session-block"><div class="session-head"><h3>${esc(s.label)}</h3><span class="muted">${fi(total)} points · ${wins} won of ${s.races.length}</span></div>${races}</div>`;
     }).join('');
-    return `<section class="section" id="gare" aria-labelledby="h-gare">
-      ${sectionHead('gare', 'Gare', 'Gara per gara')}
+    return `<section class="section" id="races" aria-labelledby="h-races">
+      ${sectionHead('races', 'Races', 'Race by race')}
       ${blocks}
-      <div class="panel"><h3>Esporta per un foglio di calcolo</h3>
-        <p class="note">Copia i dati in formato CSV e incollali in Excel, Numbers o Google Sheets.</p>
+      <div class="panel"><h3>Export to a spreadsheet</h3>
+        <p class="note">Copy the data as CSV and paste it into Excel, Numbers or Google Sheets.</p>
         <div class="export" style="margin-top:10px">
-          <button class="btn" type="button" data-action="copy-uma">Copia uma per gara</button>
-          <button class="btn" type="button" data-action="copy-skill">Copia skill</button>
+          <button class="btn" type="button" data-action="copy-uma">Copy umas per race</button>
+          <button class="btn" type="button" data-action="copy-skill">Copy skills</button>
           <span class="small muted" id="copy-status" role="status"></span>
-          <textarea id="copy-area" aria-label="Dati CSV da copiare" readonly hidden></textarea>
+          <textarea id="copy-area" aria-label="CSV data to copy" readonly hidden></textarea>
         </div></div>
     </section>`;
   }
 
   function secPriorities(A) {
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
-    return `<section class="section" id="priorita" aria-labelledby="h-priorita">
-      ${sectionHead('priorita', 'Cosa migliorare', 'Priorità, in ordine di punti', `Stime in punti finali per sessione. Servono a ordinare le priorità, non sono previsioni esatte.`)}
+    return `<section class="section" id="improve" aria-labelledby="h-improve">
+      ${sectionHead('improve', 'What to improve', 'Priorities, by points', 'Estimates in final points per session. They are meant to rank priorities, not to predict exact results.')}
       ${actionList(A.recs.est, max)}
-      <div class="section-head"><h3>Altre indicazioni</h3></div>
+      <div class="section-head"><h3>Other notes</h3></div>
       ${noteList(A.recs.notes)}
     </section>`;
   }
 
   function secLegend() {
-    return `<section class="section" id="legenda" aria-labelledby="h-legenda">
-      ${sectionHead('legenda', 'Legenda', 'Come si calcolano i punti', 'Regole ricavate confrontando ogni evento di punteggio con il replay delle gare. Quelle indicate come «dedotto» si basano su pochi casi.')}
+    return `<section class="section" id="legend" aria-labelledby="h-legend">
+      ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays. Those marked “inferred” are based on few cases.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
-      <p class="note">Nomi delle skill: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, testi del client Global. Le probabilità legate alla Saggezza usano formule note della community e sono indicative.</p>
+      <p class="note">Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
     </section>`;
   }
 
@@ -462,22 +463,22 @@
     if (state.busy && state.files.length) {
       el.hidden = false;
       el.classList.remove('demo');
-      el.innerHTML = '<div class="status-text">Analisi in corso…</div>';
+      el.innerHTML = '<div class="status-text">Analyzing…</div>';
       return;
     }
     let text = '';
     let actions = '';
     if (A) {
-      const what = `${A.nSessions} ${A.nSessions === 1 ? 'sessione' : 'sessioni'} · ${A.nRaces} gare · ${A.nCurrent} uma in squadra${A.nUmas > A.nCurrent ? ` (+${A.nUmas - A.nCurrent} uscite)` : ''}`;
-      if (state.source === 'demo') text = `<strong>Esempio:</strong> ${esc(state.demoLabel)} (${what}). Carica i tuoi file per sostituirlo.`;
-      else if (state.source === 'saved') text = `${what}. File ricordati da questo dispositivo.`;
+      const what = `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')} · ${A.nRaces} races · ${A.nCurrent} umas on the team${A.nUmas > A.nCurrent ? ` (+${A.nUmas - A.nCurrent} former)` : ''}`;
+      if (state.source === 'demo') text = `<strong>Example:</strong> ${esc(state.demoLabel)} (${what}). Load your own files to replace it.`;
+      else if (state.source === 'saved') text = `${what}. Files remembered on this device.`;
       else text = `${what}.`;
-      if (A.missingReplay) text += ' <span class="muted">Replay non leggibile per alcune gare: diagnostica di HP, skill e partenze parziale.</span>';
-      if (A.badChecks) text += ` <span class="muted">In ${A.badChecks} gare la somma dei punti non torna con il totale.</span>`;
-      actions = `<div class="status-actions"><label class="btn" for="file-input">Aggiungi file</label>${state.source === 'demo' ? '' : '<button class="btn btn-ghost" type="button" data-action="clear">Svuota</button>'}</div>`;
+      if (A.missingReplay) text += ' <span class="muted">Some races have an unreadable replay: HP, skill and start diagnostics are partial.</span>';
+      if (A.badChecks) text += ` <span class="muted">In ${A.badChecks} races the points do not add up to the total.</span>`;
+      actions = `<div class="status-actions"><label class="btn" for="file-input">Add files</label>${state.source === 'demo' ? '' : '<button class="btn btn-ghost" type="button" data-action="clear">Clear</button>'}</div>`;
     } else if (window.UMA_DEMO && window.UMA_DEMO.files) {
-      text = 'Vuoi vedere prima come funziona?';
-      actions = '<div class="status-actions"><button class="btn" type="button" data-action="demo">Mostra l\'esempio</button></div>';
+      text = 'Want to see how it works first?';
+      actions = '<div class="status-actions"><button class="btn" type="button" data-action="demo">Show the example</button></div>';
     }
     const msgs = state.messages.map((m) => `<div class="small">${esc(m)}</div>`).join('');
     const errs = state.errors.length ? `<div class="errors">${state.errors.map(esc).join('<br>')}</div>` : '';
@@ -501,7 +502,7 @@
       : '';
   }
 
-  // ------------------------------------------------------------ interazioni
+  // ------------------------------------------------------------ interactions
 
   const tip = $('#tooltip');
   function showTip(el, x, y) {
@@ -549,14 +550,14 @@
     const status = $('#copy-status');
     try {
       await navigator.clipboard.writeText(text);
-      status.textContent = 'Copiato negli appunti.';
+      status.textContent = 'Copied to the clipboard.';
       area.hidden = true;
     } catch (e) {
       area.hidden = false;
       area.value = text;
       area.focus();
       area.select();
-      status.textContent = 'Copia non consentita qui: il testo è selezionato, copialo a mano.';
+      status.textContent = 'Copying is not allowed here: the text is selected, copy it by hand.';
     }
   }
 
@@ -600,7 +601,7 @@
     readFiles([...e.dataTransfer.files]);
   });
 
-  // ------------------------------------------------------------ avvio
+  // ------------------------------------------------------------ start-up
 
   (async function start() {
     const saved = loadSaved();
@@ -610,7 +611,7 @@
     } else if (window.UMA_DEMO && window.UMA_DEMO.files) {
       state.files = window.UMA_DEMO.files;
       state.source = 'demo';
-      state.demoLabel = window.UMA_DEMO.label || 'dati di esempio';
+      state.demoLabel = window.UMA_DEMO.label || 'sample data';
     }
     if (state.files.length) await rebuild();
     else render();

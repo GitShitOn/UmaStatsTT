@@ -1,5 +1,5 @@
-/* Layout: programma di gara. Barra verde pista fissa in alto, una colonna di sezioni,
-   ogni tabella larga scorre nel proprio contenitore. Casacca lampone come unico accento. */
+/* Layout: a race-day program. Turf-green bar pinned at the top, one column of sections,
+   every wide table scrolls inside its own container. Raspberry silks as the only accent. */
 :root {
   --bg: #eef2ee;
   --surface: #fbfcfa;
@@ -154,7 +154,7 @@ a { color: inherit; }
 .muted { color: var(--muted); }
 .small { font-size: var(--step--1); }
 
-/* ------------------------------------------------------------ barra in alto */
+/* ------------------------------------------------------------ top bar */
 .topbar {
   position: sticky;
   top: env(safe-area-inset-top, 0px);
@@ -208,7 +208,7 @@ a { color: inherit; }
 .sections a:hover { background: var(--turf-2); opacity: 1; }
 .load-btn { margin-left: auto; flex: none; }
 
-/* ------------------------------------------------------------ pulsanti */
+/* ------------------------------------------------------------ buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -229,7 +229,7 @@ a { color: inherit; }
 .btn-primary:hover { filter: brightness(1.08); border-color: transparent; }
 .btn-ghost { background: transparent; }
 
-/* ------------------------------------------------------------ pagina */
+/* ------------------------------------------------------------ page */
 .page {
   max-width: calc(var(--maxw) + 32px);
   margin: 0 auto;
@@ -248,7 +248,7 @@ a { color: inherit; }
 }
 .lead { font-size: var(--step-1); color: var(--ink-2); max-width: 60ch; }
 
-/* stato vuoto */
+/* empty state */
 .start {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
@@ -275,7 +275,7 @@ a { color: inherit; }
 .dropzone-sub { color: var(--muted); font-size: var(--step--1); }
 .start.compact { grid-template-columns: 1fr; }
 
-/* riga di stato */
+/* status line */
 .status {
   display: flex;
   flex-wrap: wrap;
@@ -292,7 +292,7 @@ a { color: inherit; }
 .status.demo { border-color: var(--accent); background: var(--accent-soft); }
 .status .errors { flex-basis: 100%; color: var(--bad-text); }
 
-/* ------------------------------------------------------------ sezioni */
+/* ------------------------------------------------------------ sections */
 #report { display: grid; gap: 44px; }
 .section { display: grid; gap: 18px; min-width: 0; }
 .section-head { display: grid; gap: 6px; }
@@ -308,14 +308,14 @@ a { color: inherit; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .note { color: var(--ink-2); font-size: var(--step--1); max-width: 80ch; }
 
-/* tessere numeriche */
+/* number tiles */
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 2px; min-width: 0; }
 .tile-label { font-size: var(--step--1); color: var(--ink-2); }
 .tile-value { font-size: 1.75rem; font-weight: 700; line-height: 1.15; letter-spacing: -0.01em; }
 .tile-sub { font-size: var(--step--1); color: var(--muted); }
 
-/* azioni consigliate */
+/* recommended actions */
 .actions { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .action {
   display: grid;
@@ -340,7 +340,7 @@ a { color: inherit; }
   background: var(--warn); color: #0b0b0b;
 }
 
-/* tabelle */
+/* tables */
 .table-wrap { overflow-x: auto; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
 th, td { padding: 8px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--grid); vertical-align: middle; }
@@ -352,13 +352,13 @@ td.wrap { white-space: normal; min-width: 16ch; }
 tr.sub td { color: var(--muted); }
 td.first, th.first { position: sticky; left: 0; background: var(--surface); z-index: 1; }
 
-/* barre dentro le tabelle */
+/* bars inside tables */
 .barcell { display: flex; align-items: center; gap: 8px; min-width: 180px; }
 .barcell .track { flex: 1; height: 12px; position: relative; }
 .barcell .track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; background: var(--s1); }
 .barcell .v { min-width: 6ch; text-align: right; font-variant-numeric: tabular-nums; }
 
-/* chip distanza, posizioni, segnali */
+/* distance chips, positions, flags */
 .chip { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
 .chip i { width: 10px; height: 10px; border-radius: 3px; background: var(--c, var(--muted)); flex: none; }
 .d1 { --c: var(--s1); } .d2 { --c: var(--s2); } .d3 { --c: var(--s3); } .d4 { --c: var(--s4); } .d5 { --c: var(--s5); }
@@ -392,7 +392,7 @@ td.first, th.first { position: sticky; left: 0; background: var(--surface); z-in
 .noteline { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .noteline .flag { font-size: 0.78rem; }
 
-/* grafico a colonne delle sessioni */
+/* session column chart */
 .colchart { display: grid; gap: 8px; }
 .colchart-plot { position: relative; height: 220px; margin-left: 44px; }
 .colchart .gridline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
@@ -412,7 +412,7 @@ td.first, th.first { position: sticky; left: 0; background: var(--surface); z-in
 .wl b { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-2); }
 .wl b.w { background: var(--ink); border-color: var(--ink); }
 
-/* barre impilate per uma */
+/* stacked bars per uma */
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--step--1); color: var(--ink-2); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 12px; height: 12px; border-radius: 3px; background: var(--c); }
@@ -432,13 +432,13 @@ td.first, th.first { position: sticky; left: 0; background: var(--surface); z-in
 .axis span { white-space: nowrap; position: absolute; top: 2px; transform: translateX(-50%); font-size: 0.7rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 .axis span:first-child { transform: none; }
 
-/* mappa di calore avversari */
+/* opponents heatmap */
 .heat td.h { text-align: center; font-variant-numeric: tabular-nums; min-width: 92px; }
 .heat td.h small { display: block; color: var(--ink-2); font-size: 0.7rem; }
 .div-legend { display: flex; align-items: center; gap: 8px; font-size: var(--step--1); color: var(--ink-2); flex-wrap: wrap; }
 .div-legend .ramp { width: 160px; height: 10px; border-radius: 3px; background: linear-gradient(90deg, var(--div-neg), var(--div-mid), var(--div-pos)); }
 
-/* schede uma */
+/* uma cards */
 .uma-list { display: grid; gap: 8px; }
 details.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 details.card > summary {
@@ -467,7 +467,7 @@ details.card[open] > summary { border-bottom: 1px solid var(--line); }
 .kv { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--step--1); color: var(--ink-2); }
 .kv b { color: var(--ink); font-weight: 600; }
 
-/* gare */
+/* races */
 .session-block { display: grid; gap: 8px; }
 .session-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
 .session-head h3 { font-family: var(--font-mono); font-weight: 500; font-size: var(--step-0); }
@@ -475,7 +475,7 @@ details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto auto au
 .result { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
 .result.win { background: var(--turf); color: var(--turf-ink); border-color: transparent; }
 
-/* elenchi */
+/* lists */
 .never-list { display: grid; gap: 10px; }
 .never-item { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 12px; font-size: var(--step--1); }
 .never-item ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 8px; }
@@ -521,7 +521,7 @@ details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto auto au
   text-align: center;
 }
 
-/* ------------------------------------------------------------ schermi stretti */
+/* ------------------------------------------------------------ narrow screens */
 @media (max-width: 860px) {
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-2 { grid-template-columns: 1fr; }

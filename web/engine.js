@@ -1,21 +1,21 @@
 /*
- * UmaStatsTT - motore di analisi dei risultati di Team Trials.
- * Stessa logica di tt_stats.py, in JavaScript: gira nel browser (webapp) e in Node (test).
- * Nessuna dipendenza: usa DataView per il replay binario e DecompressionStream per il gzip.
+ * UmaStatsTT - Team Trials analysis engine.
+ * Same logic as tt_stats.py, in JavaScript: runs in the browser (web app) and in Node (tests).
+ * No dependencies: DataView reads the binary replay and DecompressionStream handles gzip.
  */
 (function (root) {
   'use strict';
 
-  // ---------------------------------------------------------------- tabelle
+  // ---------------------------------------------------------------- tables
 
   const DIST_NAMES = { 1: 'Sprint', 2: 'Mile', 3: 'Medium', 4: 'Long', 5: 'Dirt' };
   const STYLE_NAMES = { 1: 'Front', 2: 'Pace', 3: 'Late', 4: 'End' };
-  const MOOD_NAMES = { 1: 'Pessimo', 2: 'Scarso', 3: 'Normale', 4: 'Buono', 5: 'Ottimo' };
-  const WEATHER_NAMES = { 1: 'Sole', 2: 'Nuvoloso', 3: 'Pioggia', 4: 'Neve' };
+  const MOOD_NAMES = { 1: 'Awful', 2: 'Bad', 3: 'Normal', 4: 'Good', 5: 'Great' };
+  const WEATHER_NAMES = { 1: 'Sunny', 2: 'Cloudy', 3: 'Rainy', 4: 'Snowy' };
   const GROUND_NAMES = { 1: 'Firm', 2: 'Good', 3: 'Soft', 4: 'Heavy' };
   const APT = { 1: 'G', 2: 'F', 3: 'E', 4: 'D', 5: 'C', 6: 'B', 7: 'A', 8: 'S' };
   const STAT_KEYS = [['speed', 'SPD'], ['stamina', 'STA'], ['pow', 'POW'], ['guts', 'GUT'], ['wiz', 'WIT']];
-  const START_SKILLS = [200431, 200432]; // Concentration (oro), Focus (bianca)
+  const START_SKILLS = [200431, 200432]; // Concentration (gold), Focus (white)
 
   const CHARA_NAMES = {
     1001: 'Special Week', 1002: 'Silence Suzuka', 1003: 'Tokai Teio', 1004: 'Maruzensky',
@@ -40,78 +40,84 @@
   };
 
   const CATEGORY_LABELS = {
-    place: 'Piazzamento',
-    margin: 'Margine di vittoria',
-    upset: 'Sorpresa vs popolarità',
-    unique: 'Skill unica',
-    gold: 'Skill oro',
-    white: 'Skill bianche ed ereditate',
-    start: 'Partenza perfetta',
-    lead16: '1ª del suo stile a 1/6',
-    lead23: '1ª del suo stile a 2/3',
-    time: 'Bonus tempo',
-    rushed: 'Rushed (penalità)',
-    team: 'Bonus squadra',
-    other: 'Altro',
+    place: 'Finishing position',
+    margin: 'Winning margin',
+    upset: 'Upset vs popularity',
+    unique: 'Unique skill',
+    gold: 'Gold skills',
+    white: 'White and inherited skills',
+    start: 'Perfect start',
+    lead16: 'Leads own strategy at 1/6',
+    lead23: 'Leads own strategy at 2/3',
+    time: 'Time bonus',
+    rushed: 'Rushed (penalty)',
+    team: 'Team bonus',
+    other: 'Other',
   };
   const CATEGORY_ORDER = ['place', 'margin', 'upset', 'unique', 'gold', 'white', 'start',
     'lead16', 'lead23', 'time', 'rushed', 'team', 'other'];
   const SKILL_CATS = ['unique', 'gold', 'white'];
 
   const LEGEND = [
-    ['Piazzamento', '1ª 10.000, 2ª 8.000, 3ª 7.000, 4ª 6.000, 5ª 5.000, 6ª-7ª 4.000, 8ª 3.000, 10ª-12ª 2.000.'],
-    ['Margine di vittoria', 'Solo per la 1ª: più distacco, più punti (visti da 1.000 a 2.200).'],
-    ['Sorpresa (dedotto)', '3.000-4.000 per un 1° o 2° posto partendo poco favorita.'],
-    ['Skill', 'Bianca o unica ereditata 500, oro 1.200, unica 2.300-2.500 (sale col livello). Contano anche le passive.'],
-    ['Partenza perfetta', '+1.000 se il ritardo al via è sotto 0,02 s.'],
-    ['1ª del suo stile', '+1.000 se a 1/6 di gara sei davanti a tutte le uma con la tua stessa strategia, avversarie comprese; altri +1.000 a 2/3.'],
-    ['Bonus tempo', '+100 ogni 0,1 s sotto un tempo di riferimento del percorso (visto solo su Sprint e Mile).'],
-    ['Rushed', '−500 quando parte e −100 per ogni secondo in cui dura.'],
-    ['Bonus squadra', '+4.000 se tutte e 3 arrivano nelle prime 5, +5.000 se tutte nelle prime 3.'],
-    ['Bonus percentuali', 'Su ogni voce: avversario (circa +155%, cresce con la sua valutazione), carte supporto (circa +10%), prima uma della distanza (+10%), serie di vittorie (+2%, +3%, ...).'],
+    ['Finishing position', '1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th 3,000, 10th-12th 2,000.'],
+    ['Winning margin', '1st place only: bigger margin, more points (1,000 to 2,200 seen).'],
+    ['Upset (inferred)', '3,000-4,000 for finishing 1st or 2nd as an outsider.'],
+    ['Skills', 'White or inherited unique 500, gold 1,200, unique 2,300-2,500 (grows with level). Passive skills count too.'],
+    ['Perfect start', '+1,000 when the start delay is under 0.02 s.'],
+    ['Leads own strategy', '+1,000 if at 1/6 of the race you are ahead of every uma with your same strategy, opponents included; another +1,000 at 2/3.'],
+    ['Time bonus', '+100 per 0.1 s under a course reference time (only seen on Sprint and Mile).'],
+    ['Rushed', '−500 when it starts and −100 for every second it lasts.'],
+    ['Team bonus', '+4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.'],
+    ['Percentage bonuses', 'On every item: opponent (about +155%, grows with their rating), support cards (about +10%), first uma of the distance (+10%), win streak (+2%, +3%, ...).'],
   ];
 
+  function ordinal(n) {
+    const suffix = n % 100 >= 10 && n % 100 <= 20 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+    return `${n}${suffix}`;
+  }
+
   function scoreCategory(rid) {
-    if (rid >= 1 && rid <= 19) return ['margin', `Margine di vittoria (#${rid})`];
-    if (rid >= 20 && rid <= 22) return ['upset', `Sorpresa vs popolarità (#${rid})`];
-    if (rid === 23) return ['rushed', 'Rushed: inizio'];
-    if (rid === 24) return ['rushed', 'Rushed: ogni secondo'];
-    if (rid === 25) return ['start', 'Partenza perfetta'];
-    if (rid >= 40 && rid <= 55) return ['unique', `Skill unica (#${rid})`];
-    if (rid === 56) return ['gold', 'Skill oro'];
-    if (rid === 57) return ['white', 'Skill bianca o unica ereditata'];
-    if (rid === 58) return ['lead16', '1ª del suo stile a 1/6'];
-    if (rid === 59) return ['lead23', '1ª del suo stile a 2/3'];
-    if (rid >= 60 && rid <= 71) return ['place', `Arrivo ${rid - 59}ª`];
-    if (rid >= 80 && rid <= 92) return ['time', 'Bonus tempo'];
-    if (rid === 94) return ['team', 'Squadra: tutte nelle prime 3'];
-    if (rid === 95) return ['team', 'Squadra: tutte nelle prime 5'];
-    if (rid >= 93 && rid <= 99) return ['team', `Bonus squadra #${rid}`];
-    return ['other', `Categoria #${rid}`];
+    if (rid >= 1 && rid <= 19) return ['margin', `Winning margin (#${rid})`];
+    if (rid >= 20 && rid <= 22) return ['upset', `Upset vs popularity (#${rid})`];
+    if (rid === 23) return ['rushed', 'Rushed: start'];
+    if (rid === 24) return ['rushed', 'Rushed: each second'];
+    if (rid === 25) return ['start', 'Perfect start'];
+    if (rid >= 40 && rid <= 55) return ['unique', `Unique skill (#${rid})`];
+    if (rid === 56) return ['gold', 'Gold skill'];
+    if (rid === 57) return ['white', 'White skill or inherited unique'];
+    if (rid === 58) return ['lead16', 'Leads own strategy at 1/6'];
+    if (rid === 59) return ['lead23', 'Leads own strategy at 2/3'];
+    if (rid >= 60 && rid <= 71) return ['place', `Finished ${ordinal(rid - 59)}`];
+    if (rid >= 80 && rid <= 92) return ['time', 'Time bonus'];
+    if (rid === 94) return ['team', 'Team: all in the top 3'];
+    if (rid === 95) return ['team', 'Team: all in the top 5'];
+    if (rid >= 93 && rid <= 99) return ['team', `Team bonus #${rid}`];
+    return ['other', `Category #${rid}`];
   }
 
   function bonusKind(b) {
-    return { 1: 'ace', 3: 'avversario', 4: 'serie', 5: 'supporto' }[b.condition_type] || `bonus#${b.score_bonus_id}`;
+    return { 1: 'ace', 3: 'opponent', 4: 'streak', 5: 'support' }[b.condition_type] || `bonus#${b.score_bonus_id}`;
   }
   const BONUS_LABELS = {
-    avversario: 'Avversario',
-    supporto: 'Carte supporto',
-    ace: 'Prima uma della distanza',
-    serie: 'Serie di vittorie',
+    opponent: 'Opponent',
+    support: 'Support cards',
+    ace: 'First uma of the distance',
+    streak: 'Win streak',
   };
 
-  // ---------------------------------------------------------------- utilità
+  // ---------------------------------------------------------------- helpers
 
-  // formato italiano con separatore delle migliaia sempre presente (1.234) e virgola decimale
-  const group = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  // English number format: 1,234 and 2.65
+  const group = (s) => s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const ff = (x, d = 1) => {
     if (x == null || Number.isNaN(x)) return '–';
     const [i, f] = Math.abs(x).toFixed(d).split('.');
     const neg = x < 0 && Number(Math.abs(x).toFixed(d)) !== 0;
-    return (neg ? '−' : '') + group(i) + (f ? `,${f}` : '');
+    return (neg ? '−' : '') + group(i) + (f ? `.${f}` : '');
   };
   const fi = (x) => ff(x, 0);
   const pct = (x, d = 0) => (x == null || Number.isNaN(x) ? '–' : `${ff(100 * x, d)}%`);
+  const plural = (n, one, many) => (n === 1 ? one : many);
   const mean = (xs) => { const v = xs.filter((x) => x != null && !Number.isNaN(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
   const inc = (obj, k, v = 1) => { obj[k] = (obj[k] || 0) + v; };
@@ -126,7 +132,7 @@
   function sessionLabel(filename) {
     const m = /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/.exec(filename || '');
     if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
-    return (filename || 'sessione').replace(/\.json$/i, '');
+    return (filename || 'session').replace(/\.json$/i, '');
   }
 
   function distCategory(meters, distType) {
@@ -148,7 +154,7 @@
     return Math.max(0.2, 1 - 90 / wiz);
   }
 
-  // ---------------------------------------------------------------- skill
+  // ---------------------------------------------------------------- skills
 
   class SkillDB {
     constructor(raw) {
@@ -182,13 +188,11 @@
     }
     label(sid) { const n = this.name(sid); return n ? `${n} [${sid}]` : String(sid); }
     kind(sid, observed) {
-      if (sid >= 900000 && sid < 1000000) return 'unica ered.';
+      if (sid >= 900000 && sid < 1000000) return 'inherited';
       const r = this.rarity[sid];
-      if (r) return r === 1 ? 'bianca' : r === 2 ? 'oro' : 'unica';
-      if (observed === 'unique') return 'unica';
-      if (observed === 'gold') return 'oro';
-      if (observed === 'white') return 'bianca';
-      return sid >= 100000 && sid < 200000 ? 'unica' : '?';
+      if (r) return r === 1 ? 'white' : r === 2 ? 'gold' : 'unique';
+      if (SKILL_CATS.includes(observed)) return observed;
+      return sid >= 100000 && sid < 200000 ? 'unique' : '?';
     }
   }
 
@@ -283,13 +287,13 @@
     return null;
   }
 
-  // ---------------------------------------------------------------- caricamento
+  // ---------------------------------------------------------------- loading
 
   function isTeamTrialsFile(data) {
     return data && Array.isArray(data.race_result_array) && Array.isArray(data.race_start_params_array);
   }
 
-  /** Copia ridotta di un file: solo i campi usati dall'analisi, senza nomi di allenatori. */
+  /** Reduced copy of a file: only the fields the analysis uses, without trainer names. */
   function slimFile(data) {
     const keepHorse = (h, full) => {
       const o = { frame_order: h.frame_order, team_id: h.team_id, team_member_id: h.team_member_id,
@@ -324,7 +328,7 @@
 
   async function loadSession(data, filename) {
     if (!isTeamTrialsFile(data) && data && isTeamTrialsFile(data.data)) data = data.data;
-    if (!isTeamTrialsFile(data)) throw new Error('non è un file di risultati Team Trials');
+    if (!isTeamTrialsFile(data)) throw new Error('not a Team Trials results file');
     const label = sessionLabel(filename);
     const starts = {};
     data.race_start_params_array.forEach((sp) => { starts[sp.round] = sp; });
@@ -410,7 +414,7 @@
       }
       const first = results.find((c) => c.finish_order === 1);
       let winnerSide = '?';
-      if (first) winnerSide = first.team_id === ourTeam ? 'noi' : first.team_id ? 'avversari' : 'altri';
+      if (first) winnerSide = first.team_id === ourTeam ? 'us' : first.team_id ? 'opponents' : 'others';
       const total = rr.team_total_score || 0;
       races.push({
         session: label, rnd, raceId: sp.race_instance_id || 0, distType: rr.distance_type || 0, distance,
@@ -458,16 +462,15 @@
     if (late) u.blockedLate = blocked / late;
   }
 
-  // ---------------------------------------------------------------- aggregazione
+  // ---------------------------------------------------------------- aggregation
 
-  const isAce = (u) => u.slot === 1;
   const isRushed = (u) => get(u.catCount, 'rushed') > 0;
   const hpOut = (u) => u.hpZeroLeft != null && u.hpZeroLeft > 10;
   const spurtLate = (u) => u.spurtLate != null && u.spurtLate > 10;
   const staminaShort = (u) => hpOut(u) || spurtLate(u);
   const uniqueId = (u) => Object.keys(u.skillsOwned).map(Number).find((s) => s >= 100000 && s < 200000) ?? null;
 
-  /** Una voce per uma allenata. La squadra attuale e' quella dell'ultima sessione (in ordine di data). */
+  /** One entry per trained uma. The current team is the one in the latest session (by date). */
   function aggregateUmas(sessions) {
     sessions = sessions.slice().sort((a, b) => a.label.localeCompare(b.label));
     const by = new Map();
@@ -477,17 +480,17 @@
     })));
     const latest = sessions.length ? sessions[sessions.length - 1].label : null;
     const aggs = [...by.entries()].map(([key, races]) => makeAgg(key, races, races.some((r) => r.session === latest)));
-    // stesso personaggio allenato piu' volte: v1, v2, ... in ordine di prima apparizione
+    // same character trained more than once: v1, v2, ... in order of first appearance
     const groups = {};
     aggs.forEach((a) => { (groups[a.name] ||= []).push(a); });
     Object.entries(groups).forEach(([name, g]) => { if (g.length > 1) g.forEach((a, i) => { a.name = `${name} v${i + 1}`; }); });
-    aggs.forEach((a) => { a.label = a.current ? a.name : `${a.name} (ex)`; });
+    aggs.forEach((a) => { a.label = a.current ? a.name : `${a.name} (former)`; });
     aggs.sort((a, b) => a.mainDist - b.mainDist || (a.current === b.current ? 0 : a.current ? -1 : 1)
       || a.last.slot - b.last.slot || a.name.localeCompare(b.name));
     return aggs;
   }
 
-  /** Differenze di squadra tra una sessione e la precedente: uma entrate, uscite, spostate. */
+  /** Team differences between each session and the previous one: umas in, out and moved. */
   function teamChanges(sessions, umas) {
     const names = {};
     umas.forEach((a) => { names[a.key] = a.name; });
@@ -534,25 +537,25 @@
     return { owned, acts, types, pts };
   }
 
-  // ---------------------------------------------------------------- raccomandazioni
+  // ---------------------------------------------------------------- recommendations
 
   function makeRecommendations(umas, races, allUr, mult, skills) {
     const est = []; const notes = [];
     const nSessions = Math.max(1, new Set(races.map((r) => r.session)).size);
     const labels = {};
     umas.forEach((a) => { labels[a.key] = a.label; });
-    // i consigli riguardano solo la squadra attuale (ultima sessione); lo storico resta nelle statistiche
+    // advice covers only the current team (latest session); history stays in the statistics
     const cur = umas.filter((a) => a.current).length ? umas.filter((a) => a.current) : umas;
 
     for (const a of cur) {
-      // ogni uma della squadra corre una gara a sessione
+      // every uma on the team runs one race per session
       const n = a.n; const m = a.multiplier; const st = a.last.stats; const perSession = 1; const u = a.last;
       const bad = [];
-      if (u.aptDist != null && u.aptDist < 7) bad.push(`distanza ${APT[u.aptDist] || '?'} (velocità ridotta)`);
-      if (u.aptGround != null && u.aptGround < 7) bad.push(`terreno ${APT[u.aptGround] || '?'}`);
-      if (u.aptStyle != null && u.aptStyle < 7) bad.push(`stile ${APT[u.aptStyle] || '?'}`);
+      if (u.aptDist != null && u.aptDist < 7) bad.push(`distance aptitude ${APT[u.aptDist] || '?'} (lower speed)`);
+      if (u.aptGround != null && u.aptGround < 7) bad.push(`track aptitude ${APT[u.aptGround] || '?'}`);
+      if (u.aptStyle != null && u.aptStyle < 7) bad.push(`strategy aptitude ${APT[u.aptStyle] || '?'}`);
       if (bad.length) {
-        notes.push({ prio: 1, uma: a.name, text: `${a.name} (${a.distLabel}): attitudine ${bad.join(', ')}. Sotto A c'è una penalità in gara: meglio un'uma con A o S in questa categoria, oppure alzarla con l'ereditarietà.` });
+        notes.push({ prio: 1, uma: a.name, text: `${a.name} (${a.distLabel}): ${bad.join(', ')}. Below A there is a race penalty: better an uma with A or S for this category, or raise it through inheritance.` });
       }
 
       const short = a.races.filter(staminaShort);
@@ -560,15 +563,15 @@
         const where = [...new Set(short.filter((r) => r.distance).map((r) => `${r.distance} m`))].sort().join(', ');
         const causes = [];
         const outs = short.filter(hpOut);
-        if (outs.length) causes.push(`HP finita prima del traguardo (in media a ${fi(mean(outs.map((r) => r.hpZeroLeft)))} m dall'arrivo)`);
-        if (short.some(spurtLate)) causes.push('sprint finale partito in ritardo');
+        if (outs.length) causes.push(`ran out of HP before the finish (on average ${fi(mean(outs.map((r) => r.hpZeroLeft)))} m out)`);
+        if (short.some(spurtLate)) causes.push('started the final spurt late');
         const rushedToo = short.filter(isRushed).length;
         const gain = short.length / n * 1000 * m * perSession;
-        est.push({ gain, uma: a.name, kind: 'stamina', text: `${a.name}: stamina insufficiente in ${short.length}/${n} gare (${where}${rushedToo ? `, ${rushedToo} con rushed` : ''}): ${causes.join(' e ')}. Con STA ${st.stamina} servono più Resistenza o skill di recupero. Stima: circa 1 posizione, cioè 1.000 base.` });
+        est.push({ gain, uma: a.name, kind: 'stamina', text: `${a.name}: not enough stamina in ${short.length}/${n} races (${where}${rushedToo ? `, ${rushedToo} with rushed` : ''}): ${causes.join(' and ')}. With STA ${st.stamina} it needs more Stamina or recovery skills. Estimate: about 1 place, i.e. 1,000 base.` });
       } else {
         const hpEnd = mean(a.races.map((r) => r.hpEndPct));
         if (hpEnd != null && hpEnd >= 0.15 && n >= 2) {
-          notes.push({ prio: 3, uma: a.name, text: `${a.name}: arriva in media con il ${pct(hpEnd)} di HP e non resta mai a secco. STA ${st.stamina} forse in eccesso: nei prossimi allenamenti puoi spostare punti su SPD o POW.` });
+          notes.push({ prio: 3, uma: a.name, text: `${a.name}: finishes with ${pct(hpEnd)} HP on average and never runs dry. STA ${st.stamina} is probably more than needed: in future training you can move points to SPD or POW.` });
         }
       }
 
@@ -577,16 +580,16 @@
         if (k / n < 0.6) {
           const val = mean(a.races.map((r) => r.uniqueValue).filter(Boolean)) || 2400;
           const uid = uniqueId(a.last);
-          const uname = uid != null && skills.name(uid) ? ` «${skills.name(uid)}»` : '';
-          est.push({ gain: (1 - k / n) * val * m * perSession, uma: a.name, kind: 'unique', text: `${a.name}: skill unica${uname} attivata solo ${k}/${n} volte (${fi(val)} base ciascuna). Le sue condizioni di posizione o fase di gara si verificano di rado con lo stile e la distanza attuali.` });
+          const uname = uid != null && skills.name(uid) ? ` “${skills.name(uid)}”` : '';
+          est.push({ gain: (1 - k / n) * val * m * perSession, uma: a.name, kind: 'unique', text: `${a.name}: unique skill${uname} fired only ${k}/${n} times (${fi(val)} base each). Its position or race-phase conditions rarely happen with the current strategy and distance.` });
         }
       }
 
       const k = a.count(isRushed);
       if (k >= 2 || (n >= 2 && k / n >= 0.4)) {
         const loss = sum(a.races.map((r) => r.rushedLoss)) / n;
-        const hint = st.wiz < 1200 ? 'alzare la Saggezza riduce il rischio' : 'la Saggezza è già alta, è soprattutto sfortuna';
-        est.push({ gain: loss * m * perSession, uma: a.name, kind: 'rushed', text: `${a.name}: rushed in ${k}/${n} gare (−${fi(loss)} base a gara di penalità, più HP sprecata). WIT ${st.wiz}, rischio teorico circa ${pct(rushedChance(st.wiz))}: ${hint}.` });
+        const hint = st.wiz < 1200 ? 'raising Wit lowers the risk' : 'Wit is already high, it is mostly bad luck';
+        est.push({ gain: loss * m * perSession, uma: a.name, kind: 'rushed', text: `${a.name}: rushed in ${k}/${n} races (−${fi(loss)} base per race in penalties, plus wasted HP). WIT ${st.wiz}, theoretical risk about ${pct(rushedChance(st.wiz))}: ${hint}.` });
       }
     }
 
@@ -594,7 +597,7 @@
     if (rushedUr.length) {
       const loss = sum(rushedUr.map((u) => u.rushedLoss * (mean(u.multipliers) ?? mult))) / nSessions;
       const risky = cur.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
-      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${allUr.length} uma-gare: circa ${fi(loss)} finali persi a sessione solo di penalità, e l'HP sprecata costa anche posizioni. Rischio teorico più alto: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
+      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${allUr.length} runs: about ${fi(loss)} final points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
     }
 
     const target = 1000; const witItems = [];
@@ -611,18 +614,18 @@
     if (witItems.length) {
       const gain = sum(witItems.map((x) => x.gain));
       witItems.sort((x, y) => y.gain - x.gain);
-      est.push({ gain, kind: 'wit', text: `Saggezza bassa vuol dire meno skill attivate (controllo WIT, probabilità teorica): ${witItems.slice(0, 5).map((x) => `${x.a.name} WIT ${x.a.last.stats.wiz} ${pct(x.p)}`).join(', ')}. Portandola a ${fi(target)} (${pct(skillChance(target))}) la stima è circa ${fi(gain)} a sessione.` });
+      est.push({ gain, kind: 'wit', text: `Low Wit means fewer skills firing (Wit check, theoretical chance): ${witItems.slice(0, 5).map((x) => `${x.a.name} WIT ${x.a.last.stats.wiz} ${pct(x.p)}`).join(', ')}. Raising it to ${fi(target)} (${pct(skillChance(target))}) is worth about ${fi(gain)} per session.` });
     }
 
     const byDist = {};
     cur.forEach((a) => { (byDist[a.last.distType] ||= []).push(a); });
     Object.keys(byDist).map(Number).sort((x, y) => x - y).forEach((dt) => {
-      const group = byDist[dt];
-      const ace = group.find((a) => a.last.slot === 1);
-      const best = group.reduce((x, y) => (y.avg((r) => r.raw) > x.avg((r) => r.raw) ? y : x));
+      const groupDt = byDist[dt];
+      const ace = groupDt.find((a) => a.last.slot === 1);
+      const best = groupDt.reduce((x, y) => (y.avg((r) => r.raw) > x.avg((r) => r.raw) ? y : x));
       if (ace && best !== ace && best.n >= 2 && ace.n >= 2) {
         const diff = best.avg((r) => r.raw) - ace.avg((r) => r.raw);
-        est.push({ gain: 0.1 * diff, kind: 'ace', text: `${DIST_NAMES[dt]}: metti ${best.name} come prima uma (slot 1) al posto di ${ace.name} (${fi(best.avg((r) => r.raw))} contro ${fi(ace.avg((r) => r.raw))} base medi). Il +10% rende di più sull'uma che fa più punti.` });
+        est.push({ gain: 0.1 * diff, kind: 'ace', text: `${DIST_NAMES[dt]}: put ${best.name} first (slot 1) instead of ${ace.name} (${fi(best.avg((r) => r.raw))} vs ${fi(ace.avg((r) => r.raw))} average base). The +10% pays more on the uma that scores more.` });
       }
     });
 
@@ -633,7 +636,7 @@
       const teamMult = mean(races.filter((r) => r.teamRaw).map((r) => r.teamFinal / r.teamRaw)) ?? mult;
       const gain = missed.length / nSessions * 4000 * teamMult;
       const who = Object.entries(culprits).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([nm, c]) => `${nm} (${c})`).join(', ');
-      est.push({ gain, kind: 'team', text: `Bonus squadra (tutte e 3 nelle prime 5, 4.000 base) mancato in ${missed.length}/${races.length} gare: vale fino a circa ${fi(gain)} a sessione.${who ? ` Gare perse per una sola uma fuori dalle prime 5: ${who}.` : ''}` });
+      est.push({ gain, kind: 'team', text: `Team bonus (all 3 in the top 5, 4,000 base) missed in ${missed.length}/${races.length} races: worth up to about ${fi(gain)} per session.${who ? ` Races missed because of a single uma outside the top 5: ${who}.` : ''}` });
     }
 
     const startsUr = allUr.filter((u) => u.startDelay != null);
@@ -647,24 +650,24 @@
         if (g.length) parts.push(`${skills.name(sid) || sid} ${g.filter((u) => get(u.catCount, 'start')).length}/${g.length} (${[...new Set(g.map((u) => labels[u.key] || u.name))].sort().join(', ')})`);
       });
       const rest = startsUr.filter((u) => !done.has(u));
-      if (rest.length) parts.push(`nessuna delle due ${rest.filter((u) => get(u.catCount, 'start')).length}/${rest.length}`);
+      if (rest.length) parts.push(`neither ${rest.filter((u) => get(u.catCount, 'start')).length}/${rest.length}`);
       if (gain > 0) {
-        est.push({ gain, kind: 'start', text: `Partenza perfetta nel ${pct(rate)} dei casi (+1.000 base ognuna). È casuale (circa 20% senza aiuti), ma le skill che riducono il ritardo al via la rendono molto più frequente: arrivare al 50% varrebbe circa ${fi(gain)} a sessione. Partenze perfette per skill: ${parts.join('; ')}.` });
+        est.push({ gain, kind: 'start', text: `Perfect start in ${pct(rate)} of runs (+1,000 base each). It is random (about 20% without help), but skills that shorten the start delay make it much more frequent: reaching 50% would be worth about ${fi(gain)} per session. Perfect starts by skill: ${parts.join('; ')}.` });
       }
     }
 
     const l16 = allUr.filter((u) => get(u.catCount, 'lead16')).length / allUr.length;
     const l23 = allUr.filter((u) => get(u.catCount, 'lead23')).length / allUr.length;
     const neverLead = cur.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
-    notes.push({ prio: 4, text: `«1ª del suo stile» (1.000 base a 1/6 e 1.000 a 2/3 di gara) ottenuto nel ${pct(l16)} e nel ${pct(l23)} dei casi${neverLead.length ? `; mai da ${neverLead.join(', ')}` : ''}. Conta essere davanti alle altre uma con la stessa strategia, avversarie comprese.` });
+    notes.push({ prio: 4, text: `“Leads own strategy” (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in ${pct(l16)} and ${pct(l23)} of runs${neverLead.length ? `; never by ${neverLead.join(', ')}` : ''}. What counts is being ahead of every other uma with the same strategy, opponents included.` });
 
     const few = cur.filter((a) => a.n < 3);
     if (few.length && few.length < cur.length) {
-      notes.push({ prio: 2, text: `Poche gare per giudicare con sicurezza: ${few.map((a) => `${a.name} (${a.n} ${a.n === 1 ? 'gara' : 'gare'})`).join(', ')}. Le loro statistiche diventano affidabili dopo qualche sessione.` });
+      notes.push({ prio: 2, text: `Too few races to judge reliably: ${few.map((a) => `${a.name} (${a.n} ${plural(a.n, 'race', 'races')})`).join(', ')}. Their statistics become reliable after a few sessions.` });
     }
 
     const worst = cur.slice().sort((x, y) => y.avg((r) => r.finish) - x.avg((r) => r.finish)).slice(0, 3);
-    notes.push({ prio: 2, text: `Il piazzamento è la voce principale: circa 1.000 base (${fi(1000 * mult)} finali) a posizione, e tra 1ª e 2ª ci sono 2.000 base più il margine. Piazzamento medio peggiore: ${worst.map((a) => `${a.name} ${ff(a.avg((r) => r.finish), 1)}`).join(', ')}.` });
+    notes.push({ prio: 2, text: `Finishing position is the biggest item: about 1,000 base (${fi(1000 * mult)} final) per place, and 1st vs 2nd is 2,000 base plus the margin. Worst average place: ${worst.map((a) => `${a.name} ${ff(a.avg((r) => r.finish), 1)}`).join(', ')}.` });
 
     const neverCounts = [];
     cur.forEach((a) => {
@@ -674,7 +677,7 @@
     });
     if (neverCounts.length) {
       neverCounts.sort((x, y) => y[0] - x[0]);
-      notes.push({ prio: 5, text: `Skill mai attivate: ${neverCounts.map(([nv, nm]) => `${nm} ${nv}`).join(', ')}. Nei prossimi allenamenti preferisci skill con condizioni che la tua uma soddisfa: ogni attivazione vale 500-1.200 base.` });
+      notes.push({ prio: 5, text: `Skills that never fired: ${neverCounts.map(([nv, nm]) => `${nm} ${nv}`).join(', ')}. In future training prefer skills whose conditions your uma actually meets: each activation is worth 500-1,200 base.` });
     }
 
     est.sort((x, y) => y.gain - x.gain);
@@ -682,7 +685,7 @@
     return { est, notes };
   }
 
-  // ---------------------------------------------------------------- analisi completa
+  // ---------------------------------------------------------------- full analysis
 
   function analyze(sessions, skills) {
     skills = skills || new SkillDB();
@@ -698,23 +701,23 @@
 
     const allRates = {};
     sessions.forEach((s) => Object.entries(s.bonusRates).forEach(([k, v]) => { (allRates[k] ||= []).push(...v); }));
-    const mult = 1 + (mean(allRates.avversario || []) || 0) + (mean(allRates.supporto || []) || 0);
+    const mult = 1 + (mean(allRates.opponent || []) || 0) + (mean(allRates.support || []) || 0);
     const supportCfg = [...new Set(sessions.map((s) => s.supportBonus).filter(Boolean))].sort();
-    const bonuses = ['avversario', 'supporto', 'ace', 'serie'].filter((k) => allRates[k] && allRates[k].length).map((k) => {
+    const bonuses = ['opponent', 'support', 'ace', 'streak'].filter((k) => allRates[k] && allRates[k].length).map((k) => {
       const v = allRates[k];
       return { key: k, label: BONUS_LABELS[k], min: Math.min(...v), max: Math.max(...v), mean: mean(v),
-        cfg: k === 'supporto' && supportCfg.length ? supportCfg.map((x) => x / 10000) : null };
+        cfg: k === 'support' && supportCfg.length ? supportCfg.map((x) => x / 10000) : null };
     });
 
-    // sessioni
+    // sessions
     const sessionRows = sessions.map((s) => ({
       label: s.label, filename: s.filename, total: s.total, wins: s.wins, n: s.races.length,
       perRace: s.total / Math.max(1, s.races.length), oppEval: s.oppEval,
-      oppRate: mean(s.bonusRates.avversario || []), supRate: s.supportBonus ? s.supportBonus / 10000 : mean(s.bonusRates.supporto || []),
+      oppRate: mean(s.bonusRates.opponent || []), supRate: s.supportBonus ? s.supportBonus / 10000 : mean(s.bonusRates.support || []),
       results: s.races.map((r) => r.win),
     }));
 
-    // categorie
+    // categories
     const catRaw = {}; const catFinal = {}; const catCnt = {}; const catHits = {}; const unit = {};
     allUr.forEach((u) => {
       Object.entries(u.catRaw).forEach(([k, v]) => { inc(catRaw, k, v); inc(catHits, k); });
@@ -736,7 +739,7 @@
         unitMin: vals[0], unitMax: vals[vals.length - 1] };
     });
 
-    // distanze
+    // distances
     const distances = [...new Set(races.map((r) => r.distType))].sort((x, y) => x - y).map((dt) => {
       const rs = races.filter((r) => r.distType === dt);
       const urs = rs.flatMap((r) => r.ours);
@@ -750,13 +753,13 @@
         courses: [...new Set(rs.map((r) => r.distance).filter(Boolean))].sort((x, y) => x - y),
         races: rs.length, wins: rs.filter((r) => r.win).length, avgTotal: mean(rs.map((r) => r.total)),
         avgFinish: mean(urs.map((u) => u.finish)), oppFinish: mean(opps.map((o) => o.finish)),
-        teamBonus: rs.filter((r) => r.teamIds.length).length, ourFirst: rs.filter((r) => r.winnerSide === 'noi').length,
+        teamBonus: rs.filter((r) => r.teamIds.length).length, ourFirst: rs.filter((r) => r.winnerSide === 'us').length,
         statDiff,
       };
     });
-    const consistent = races.filter((r) => r.win === (r.winnerSide === 'noi')).length;
+    const consistent = races.filter((r) => r.win === (r.winnerSide === 'us')).length;
 
-    // uma
+    // umas
     const umaRows = umas.map((a) => {
       const sk = umaSkills(a);
       const skillList = Object.keys(sk.owned).map(Number).map((sid) => ({
@@ -797,7 +800,7 @@
       };
     });
 
-    // umore e partenze
+    // mood and starts
     const moods = [...new Set(allUr.map((u) => u.mood))].sort().map((m) => {
       const us = allUr.filter((u) => u.mood === m);
       return { mood: m, label: MOOD_NAMES[m] || String(m), n: us.length, avgFinish: mean(us.map((u) => u.finish)), avgRaw: mean(us.map((u) => u.raw)) };
@@ -805,7 +808,7 @@
     const delays = allUr.map((u) => u.startDelay).filter((d) => d != null);
     const starts = { total: delays.length, perfect: delays.filter((d) => d < 0.02).length, mean: mean(delays) };
 
-    // gare perse
+    // lost races
     const lost = races.filter((r) => !r.win).map((r) => {
       const w = r.opponents.find((o) => o.finish === 1);
       const best = r.ours.slice().sort((x, y) => x.finish - y.finish)[0];
@@ -844,12 +847,12 @@
   function raceNoteRow(u) {
     const notes = [];
     if (isRushed(u)) notes.push({ t: `rushed ${u.rushedSecs} s`, s: 'bad' });
-    if (hpOut(u)) notes.push({ t: `HP finita a ${fi(u.hpZeroLeft)} m`, s: 'bad' });
-    if (spurtLate(u)) notes.push({ t: `sprint +${fi(u.spurtLate)} m`, s: 'warn' });
-    if (get(u.catCount, 'start')) notes.push({ t: 'partenza perfetta', s: 'good' });
-    if (get(u.catCount, 'margin')) notes.push({ t: 'margine', s: 'good' });
-    if (get(u.catCount, 'upset')) notes.push({ t: 'sorpresa', s: 'good' });
-    if (get(u.catCount, 'time')) notes.push({ t: 'bonus tempo', s: 'good' });
+    if (hpOut(u)) notes.push({ t: `out of HP ${fi(u.hpZeroLeft)} m out`, s: 'bad' });
+    if (spurtLate(u)) notes.push({ t: `spurt +${fi(u.spurtLate)} m`, s: 'warn' });
+    if (get(u.catCount, 'start')) notes.push({ t: 'perfect start', s: 'good' });
+    if (get(u.catCount, 'margin')) notes.push({ t: 'margin', s: 'good' });
+    if (get(u.catCount, 'upset')) notes.push({ t: 'upset', s: 'good' });
+    if (get(u.catCount, 'time')) notes.push({ t: 'time bonus', s: 'good' });
     return {
       session: u.session, rnd: u.rnd, dist: DIST_NAMES[u.distType] || String(u.distType), distance: u.distance,
       slot: u.slot, finish: u.finish, popularity: u.popularity, mood: MOOD_NAMES[u.mood] || '?', raw: u.raw, final: u.final,
@@ -870,10 +873,10 @@
     const cats = CATEGORY_ORDER.filter((k) => k !== 'team');
     const agg = {};
     aggregateUmas(sessions).forEach((a) => { agg[a.key] = a; });
-    const lines = [csvLine(['sessione', 'gara', 'distanza_tipo', 'metri', 'vinta', 'uma', 'in_squadra', 'tcid', 'slot', 'stile',
-      'SPD', 'STA', 'POW', 'GUT', 'WIT', 'umore', 'popolarita', 'arrivo', 'punti_base', 'punti_finali',
-      ...cats.map((k) => `base_${k}`), 'skill_bianche', 'skill_oro', 'skill_unica', 'ritardo_partenza',
-      'rushed_secondi', 'hp_finale_pct', 'hp_finita_m_al_traguardo', 'sprint_ritardo_m', 'bloccata_pct'])];
+    const lines = [csvLine(['session', 'race', 'distance_type', 'meters', 'won', 'uma', 'on_team', 'tcid', 'slot', 'strategy',
+      'SPD', 'STA', 'POW', 'GUT', 'WIT', 'mood', 'popularity', 'finish', 'base_points', 'final_points',
+      ...cats.map((k) => `base_${k}`), 'white_skills', 'gold_skills', 'unique_skill', 'start_delay',
+      'rushed_seconds', 'hp_left_pct', 'hp_out_m_to_finish', 'spurt_late_m', 'blocked_pct'])];
     const r1 = (x, d = 1) => (x == null ? '' : Math.round(x * 10 ** d) / 10 ** d);
     sessions.forEach((s) => s.races.forEach((r) => r.ours.forEach((u) => {
       lines.push(csvLine([s.label, r.rnd, DIST_NAMES[r.distType] || r.distType, r.distance || '', r.win ? 1 : 0,
@@ -887,7 +890,7 @@
   }
 
   function skillsCSV(sessions, skills) {
-    const lines = [csvLine(['uma', 'in_squadra', 'tcid', 'skill_id', 'nome', 'livello', 'tipo', 'gare', 'attivazioni', 'punti_base'])];
+    const lines = [csvLine(['uma', 'on_team', 'tcid', 'skill_id', 'name', 'level', 'kind', 'races', 'activations', 'base_points'])];
     aggregateUmas(sessions).forEach((a) => {
       const { owned, acts, types, pts } = umaSkills(a);
       Object.keys(owned).map(Number).sort((x, y) => x - y).forEach((sid) => {
@@ -901,7 +904,7 @@
   const api = {
     DIST_NAMES, STYLE_NAMES, MOOD_NAMES, WEATHER_NAMES, GROUND_NAMES, APT, STAT_KEYS, CATEGORY_LABELS,
     CATEGORY_ORDER, LEGEND, SkillDB, parseScenario, loadSession, slimFile, isTeamTrialsFile, analyze,
-    umaRacesCSV, skillsCSV, rushedChance, skillChance, fi, ff, pct,
+    umaRacesCSV, skillsCSV, rushedChance, skillChance, ordinal, plural, fi, ff, pct,
   };
   root.UmaEngine = api;
   if (typeof module === 'object' && module.exports) module.exports = api;

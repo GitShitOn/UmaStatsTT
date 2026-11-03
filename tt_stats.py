@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-UmaStatsTT - analisi dei risultati di Team Trials (Uma Musume Pretty Derby).
+UmaStatsTT - Team Trials results analyzer (Uma Musume Pretty Derby).
 
-Legge i file JSON salvati dalle sessioni di Team Trials (TT-AAAAMMGG_hhmmss_xxx.json),
-decodifica anche il replay binario di ogni gara (`race_scenario`) e stampa statistiche
-pensate per capire DOVE si perdono punti e COSA conviene migliorare.
+Reads the JSON files saved from Team Trials sessions (TT-YYYYMMDD_hhmmss_xxx.json),
+also decodes each race's binary replay (`race_scenario`), and prints statistics meant
+to show WHERE you lose points and WHAT is worth improving.
 
-Uso:
-    python3 tt_stats.py                   # cerca i TT-*.json in ./data e nella cartella corrente
-    python3 tt_stats.py cartella/ file.json ...
-    python3 tt_stats.py data/ --dettaglio # aggiunge il resoconto gara per gara
-    python3 tt_stats.py data/ --skill     # tabella completa delle skill per ogni uma
+Usage:
+    python3 tt_stats.py                     # looks for TT-*.json in ./data and the current folder
+    python3 tt_stats.py folder/ file.json ...
+    python3 tt_stats.py data/ --details     # adds a race-by-race breakdown
+    python3 tt_stats.py data/ --skills      # full skill table for every uma
     python3 tt_stats.py data/ --md report.md --csv export/
 
-Solo libreria standard, Python >= 3.8.
+Standard library only, Python >= 3.8.
 """
 
 from __future__ import annotations
@@ -36,17 +36,17 @@ from statistics import mean
 from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
-# Tabelle di decodifica
+# Lookup tables
 # ---------------------------------------------------------------------------
 
 DIST_NAMES = {1: "Sprint", 2: "Mile", 3: "Medium", 4: "Long", 5: "Dirt"}
 STYLE_NAMES = {1: "Front", 2: "Pace", 3: "Late", 4: "End"}
-MOOD_NAMES = {1: "Pessimo", 2: "Scarso", 3: "Normale", 4: "Buono", 5: "Ottimo"}
-WEATHER_NAMES = {1: "Sole", 2: "Nuvoloso", 3: "Pioggia", 4: "Neve"}
+MOOD_NAMES = {1: "Awful", 2: "Bad", 3: "Normal", 4: "Good", 5: "Great"}
+WEATHER_NAMES = {1: "Sunny", 2: "Cloudy", 3: "Rainy", 4: "Snowy"}
 GROUND_NAMES = {1: "Firm", 2: "Good", 3: "Soft", 4: "Heavy"}
 APT_LETTERS = {1: "G", 2: "F", 3: "E", 4: "D", 5: "C", 6: "B", 7: "A", 8: "S"}
 
-# chara_id -> nome (versione Global). Gli id non presenti vengono mostrati come "Chara <id>".
+# chara_id -> name (Global version). Unknown ids are shown as "Chara <id>".
 CHARA_NAMES = {
     1001: "Special Week", 1002: "Silence Suzuka", 1003: "Tokai Teio", 1004: "Maruzensky",
     1005: "Fuji Kiseki", 1006: "Oguri Cap", 1007: "Gold Ship", 1008: "Vodka",
@@ -69,108 +69,114 @@ CHARA_NAMES = {
     1071: "Mejiro Ardan", 1072: "Yaeno Muteki",
 }
 
-# Categorie dei punti base (raw_score_id). Ricavate dai dati: ogni evento di punteggio
-# nel replay e' stato confrontato con lo stato della gara (posizioni, HP, skill, tempi).
-# "(dedotto)" = interpretazione coerente con i dati ma basata su pochi casi.
+# Base-point categories (raw_score_id). Derived from the data: every score event in the
+# replay was matched against the race state (positions, HP, skills, times).
+# "(inferred)" = consistent with the data but based on few cases.
 CATEGORY_LABELS = {
-    "place": "Piazzamento",
-    "margin": "Margine di vittoria",
-    "upset": "Sorpresa vs popolarita' (dedotto)",
-    "unique": "Skill unica",
-    "gold": "Skill oro",
-    "white": "Skill bianche / unica ereditata",
-    "start": "Partenza perfetta (<0,02 s)",
-    "lead16": "1a del proprio stile a 1/6 gara",
-    "lead23": "1a del proprio stile a 2/3 gara",
-    "time": "Bonus tempo (sotto il riferimento)",
-    "rushed": "Rushed / kakari (penalita')",
-    "team": "Bonus squadra",
-    "other": "Altro",
+    "place": "Finishing position",
+    "margin": "Winning margin",
+    "upset": "Upset vs popularity (inferred)",
+    "unique": "Unique skill",
+    "gold": "Gold skills",
+    "white": "White / inherited unique skills",
+    "start": "Perfect start (<0.02 s)",
+    "lead16": "Leads own strategy at 1/6",
+    "lead23": "Leads own strategy at 2/3",
+    "time": "Time bonus (under reference)",
+    "rushed": "Rushed (penalty)",
+    "team": "Team bonus",
+    "other": "Other",
 }
 CATEGORY_ORDER = ["place", "margin", "upset", "unique", "gold", "white", "start",
                   "lead16", "lead23", "time", "rushed", "team", "other"]
 SKILL_CATS = ("unique", "gold", "white")
 
 
+def ordinal(n: int) -> str:
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def score_category(rid: int) -> Tuple[str, str]:
-    """raw_score_id -> (categoria, descrizione)."""
+    """raw_score_id -> (category, description)."""
     if 1 <= rid <= 19:
-        return "margin", f"Margine di vittoria (#{rid}, id basso = distacco maggiore)"
+        return "margin", f"Winning margin (#{rid}, lower id = bigger margin)"
     if 20 <= rid <= 22:
-        return "upset", f"Sorpresa: piazzamento molto migliore della popolarita' (#{rid})"
+        return "upset", f"Upset: finished far above popularity (#{rid})"
     if rid == 23:
-        return "rushed", "Rushed: inizio (-500)"
+        return "rushed", "Rushed: start (-500)"
     if rid == 24:
-        return "rushed", "Rushed: ogni secondo (-100)"
+        return "rushed", "Rushed: each second (-100)"
     if rid == 25:
-        return "start", "Partenza perfetta (ritardo < 0,02 s)"
+        return "start", "Perfect start (delay < 0.02 s)"
     if 40 <= rid <= 55:
-        return "unique", f"Skill unica (#{rid})"
+        return "unique", f"Unique skill (#{rid})"
     if rid == 56:
-        return "gold", "Skill oro"
+        return "gold", "Gold skill"
     if rid == 57:
-        return "white", "Skill bianca / unica ereditata"
+        return "white", "White skill / inherited unique"
     if rid == 58:
-        return "lead16", "1a tra le uma del suo stile a fine fase iniziale (1/6)"
+        return "lead16", "Leads the umas of its strategy at the end of the opening phase (1/6)"
     if rid == 59:
-        return "lead23", "1a tra le uma del suo stile a inizio fase finale (2/3)"
+        return "lead23", "Leads the umas of its strategy at the start of the final phase (2/3)"
     if 60 <= rid <= 71:
-        return "place", f"Arrivo {rid - 59}a"
+        return "place", f"Finished {ordinal(rid - 59)}"
     if 80 <= rid <= 92:
-        return "time", "Bonus tempo: +100 ogni 0,1 s sotto il tempo di riferimento"
+        return "time", "Time bonus: +100 per 0.1 s under the reference time"
     if rid == 94:
-        return "team", "Squadra: tutte e 3 nelle prime 3"
+        return "team", "Team: all 3 in the top 3"
     if rid == 95:
-        return "team", "Squadra: tutte e 3 nelle prime 5"
+        return "team", "Team: all 3 in the top 5"
     if 93 <= rid <= 99:
-        return "team", f"Bonus squadra #{rid}"
-    return "other", f"Categoria sconosciuta #{rid}"
+        return "team", f"Team bonus #{rid}"
+    return "other", f"Unknown category #{rid}"
 
 
 def bonus_kind(b: dict) -> str:
-    """Tipo di bonus moltiplicativo (bonus_array) in base a condition_type."""
+    """Kind of multiplicative bonus (bonus_array), based on condition_type."""
     ct = b.get("condition_type")
-    return {1: "ace", 3: "avversario", 4: "serie", 5: "supporto"}.get(ct, f"bonus#{b.get('score_bonus_id')}")
+    return {1: "ace", 3: "opponent", 4: "streak", 5: "support"}.get(ct, f"bonus#{b.get('score_bonus_id')}")
 
 
 BONUS_LABELS = {
-    "ace": "Slot 1 / Ace (+10%)",
-    "avversario": "Avversario (cresce con la sua valutazione)",
-    "serie": "Serie di vittorie",
-    "supporto": "Carte supporto",
+    "ace": "First uma of the distance / slot 1 (+10%)",
+    "opponent": "Opponent (grows with their rating)",
+    "streak": "Win streak",
+    "support": "Support cards",
 }
 
 LEGEND = [
-    "Piazzamento: 1a 10.000, 2a 8.000, 3a 7.000, 4a 6.000, 5a 5.000, 6a-7a 4.000, 8a 3.000, 10a-12a 2.000.",
-    "Margine di vittoria (solo alla 1a): piu' distacco = piu' punti (osservati 1.000-2.200).",
-    "Sorpresa (dedotto): 3.000-4.000 se arrivi 1a/2a partendo poco favorita (popolarita' bassa).",
-    "Skill: bianca o unica ereditata 500, oro 1.200, unica 2.300-2.500 (sale col livello). Le passive contano.",
-    "Partenza perfetta: +1.000 se il ritardo al via e' sotto 0,02 s.",
-    "1a del proprio stile: +1.000 se a 1/6 di gara (fine fase iniziale) sei davanti a tutte le uma con la "
-    "tua stessa strategia; altri +1.000 a 2/3 (inizio fase finale).",
-    "Bonus tempo: +100 ogni 0,1 s sotto un tempo di riferimento del percorso (visto solo su Sprint/Mile).",
-    "Rushed (kakari): -500 all'inizio e -100 per ogni secondo in cui dura.",
-    "Squadra: +4.000 se tutte e 3 arrivano nelle prime 5, +5.000 se tutte nelle prime 3.",
-    "Bonus percentuali su ogni voce: avversario (~+155%, cresce con la sua valutazione), carte supporto "
-    "(~+10%), prima uma della distanza / slot 1 (+10%), serie di vittorie (+2%, +3%, ...).",
+    "Finishing position: 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th 3,000, "
+    "10th-12th 2,000.",
+    "Winning margin (1st place only): bigger margin = more points (1,000-2,200 observed).",
+    "Upset (inferred): 3,000-4,000 for finishing 1st/2nd as an outsider (low popularity).",
+    "Skills: white or inherited unique 500, gold 1,200, unique 2,300-2,500 (grows with level). Passive skills count.",
+    "Perfect start: +1,000 when the start delay is under 0.02 s.",
+    "Leads own strategy: +1,000 if at 1/6 of the race (end of the opening phase) you are ahead of every uma "
+    "with your same strategy; another +1,000 at 2/3 (start of the final phase).",
+    "Time bonus: +100 per 0.1 s under a course reference time (only seen on Sprint/Mile).",
+    "Rushed: -500 when it starts and -100 for every second it lasts.",
+    "Team: +4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.",
+    "Percentage bonuses on every item: opponent (~+155%, grows with their rating), support cards (~+10%), "
+    "first uma of the distance / slot 1 (+10%), win streak (+2%, +3%, ...).",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Formattazione numeri (stile italiano)
+# Number formatting
 # ---------------------------------------------------------------------------
 
 
 def fi(x) -> str:
     if x is None:
         return "-"
-    return f"{int(round(x)):,}".replace(",", ".")
+    return f"{int(round(x)):,}"
 
 
 def ff(x, d: int = 1) -> str:
     if x is None:
         return "-"
-    return f"{x:.{d}f}".replace(".", ",")
+    return f"{x:,.{d}f}"
 
 
 def pct(x, d: int = 0) -> str:
@@ -183,13 +189,17 @@ def frac(k: int, n: int) -> str:
     return f"{k}/{n}"
 
 
+def plural(n: int, one: str, many: str) -> str:
+    return one if n == 1 else many
+
+
 def safe_mean(xs, default=None):
     xs = [x for x in xs if x is not None]
     return mean(xs) if xs else default
 
 
 # ---------------------------------------------------------------------------
-# Decodifica del replay (race_scenario: base64 + gzip + binario little-endian)
+# Replay decoding (race_scenario: base64 + gzip + little-endian binary)
 # ---------------------------------------------------------------------------
 
 EV_SCORE, EV_SKILL = 0, 3
@@ -198,8 +208,8 @@ EV_SCORE, EV_SKILL = 0, 3
 @dataclass
 class Scenario:
     frames: list            # [(t, [(dist, lane, speed, hp, temptation, block_front), ...])]
-    results: list           # per indice cavallo (= frame_order - 1)
-    events: list            # [(t, tipo, params)]
+    results: list           # per horse index (= frame_order - 1)
+    events: list            # [(t, type, params)]
     distance: Optional[int] = None
 
 
@@ -254,12 +264,12 @@ def parse_scenario(blob: Optional[str]) -> Optional[Scenario]:
         sc = Scenario(frames, results, events)
         sc.distance = _estimate_distance(sc)
         return sc
-    except Exception:  # formato inatteso: si prosegue senza replay
+    except Exception:  # unexpected format: carry on without the replay
         return None
 
 
 def _estimate_distance(sc: Scenario) -> Optional[int]:
-    """Lunghezza del percorso: posizione del vincitore all'istante d'arrivo, arrotondata a 100 m."""
+    """Course length: the winner's position at its finish time, rounded to 100 m."""
     if not sc.frames or not sc.results:
         return None
     win = min(range(len(sc.results)), key=lambda i: sc.results[i]["order"])
@@ -273,7 +283,7 @@ def _estimate_distance(sc: Scenario) -> Optional[int]:
 
 
 # ---------------------------------------------------------------------------
-# Modello dati
+# Data model
 # ---------------------------------------------------------------------------
 
 
@@ -308,21 +318,21 @@ class UmaRace:
     skills_owned: Dict[int, int] = field(default_factory=dict)
     skill_acts: Counter = field(default_factory=Counter)
     skill_type: Dict[int, str] = field(default_factory=dict)
-    skill_points: Counter = field(default_factory=Counter)  # punti base per skill
+    skill_points: Counter = field(default_factory=Counter)  # base points per skill
     unique_value: Optional[int] = None
     start_delay: Optional[float] = None
     rushed_secs: int = 0
     rushed_loss: int = 0
-    spurt_late: Optional[float] = None   # metri di ritardo dello sprint finale rispetto a 2/3
+    spurt_late: Optional[float] = None   # metres the final spurt started after the 2/3 mark
     hp_start: Optional[int] = None
     hp_end_pct: Optional[float] = None
-    hp_zero_left: Optional[float] = None  # metri al traguardo quando l'HP e' finita
+    hp_zero_left: Optional[float] = None  # metres to the finish when HP ran out
     blocked_late: Optional[float] = None
     multipliers: list = field(default_factory=list)
 
     @property
     def key(self):
-        """Identita' dell'uma allenata: trained_chara_id, oppure personaggio + statistiche se manca."""
+        """Identity of the trained uma: trained_chara_id, or character + stats if missing."""
         if self.tcid:
             return self.tcid
         return (self.chara_id, self.card_id, tuple(self.stats[k] for k, _ in STAT_KEYS))
@@ -360,7 +370,6 @@ class Opponent:
     style: int
     stats: Dict[str, int]
     finish: int
-    trainer: str
 
 
 @dataclass
@@ -381,7 +390,7 @@ class Race:
     team_ids: List[int]
     ours: List[UmaRace]
     opponents: List[Opponent]
-    winner_side: str             # "noi" / "avversari" / "altri"
+    winner_side: str             # "us" / "opponents" / "others"
     check_ok: bool
 
 
@@ -440,7 +449,7 @@ def load_session(path: str) -> Session:
     if "race_result_array" not in data and isinstance(data.get("data"), dict):
         data = data["data"]
     if "race_result_array" not in data or "race_start_params_array" not in data:
-        raise ValueError("non sembra un file di risultati Team Trials")
+        raise ValueError("does not look like a Team Trials results file")
 
     label = session_label(path)
     starts = {sp.get("round"): sp for sp in data["race_start_params_array"]}
@@ -456,7 +465,7 @@ def load_session(path: str) -> Session:
         horses = {h["frame_order"]: h for h in sp.get("race_horse_data_array", [])}
         results = {c["frame_order"]: c for c in rr.get("chara_result_array", [])}
 
-        # la nostra squadra = quella con i punteggi (fallback: team_id 1)
+        # our team = the one that has scores (fallback: team_id 1)
         our_team = next((c["team_id"] for c in results.values() if c.get("score_array")), 1)
         sc = parse_scenario(rr.get("race_scenario"))
         distance = sc.distance if sc else None
@@ -474,7 +483,7 @@ def load_session(path: str) -> Session:
                         name=chara_name(h.get("chara_id", 0), h.get("card_id", 0)),
                         chara_id=h.get("chara_id", 0), slot=h.get("team_member_id", 0),
                         style=h.get("running_style", 0), stats=stats,
-                        finish=c.get("finish_order", 0), trainer=h.get("owner_trainer_name") or ""))
+                        finish=c.get("finish_order", 0)))
                 continue
             cat = dist_category(distance, rr.get("distance_type", 0))
             apt_dist = h.get(f"proper_distance_{cat}")
@@ -503,7 +512,7 @@ def load_session(path: str) -> Session:
                 u.final += s["score"]
                 u.cat_raw[cat_key] += raw
                 u.cat_final[cat_key] += s["score"]
-                if s["raw_score_id"] != 24:  # i secondi di rushed non sono eventi distinti
+                if s["raw_score_id"] != 24:  # rushed seconds are not separate events
                     u.cat_count[cat_key] += s.get("num", 1)
                 u.entries.append((s["raw_score_id"], s.get("num", 1), raw, s["score"]))
                 if cat_key == "rushed":
@@ -536,11 +545,11 @@ def load_session(path: str) -> Session:
         if first is None:
             winner_side = "?"
         elif first.get("team_id") == our_team:
-            winner_side = "noi"
+            winner_side = "us"
         elif first.get("team_id"):
-            winner_side = "avversari"
+            winner_side = "opponents"
         else:
-            winner_side = "altri"
+            winner_side = "others"
 
         total = rr.get("team_total_score", 0)
         check_ok = (sum(u.final for u in ours) + team_final) == total
@@ -559,13 +568,13 @@ def load_session(path: str) -> Session:
 
 
 def _scenario_diagnostics(u: UmaRace, sc: Scenario, idx: int) -> None:
-    """Metriche ricavate dal replay per l'uma con indice `idx`."""
+    """Metrics taken from the replay for the uma at index `idx`."""
     if idx >= len(sc.results):
         return
     res = sc.results[idx]
     u.start_delay = res["delay"]
 
-    # skill attivate e punti generati da ciascuna (l'evento punteggio segue quello della skill)
+    # activated skills and the points each one produced (the score event follows the skill event)
     pending = None
     for t, typ, p in sc.events:
         if not p or p[0] != idx:
@@ -606,7 +615,7 @@ def _scenario_diagnostics(u: UmaRace, sc: Scenario, idx: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Aggregazioni
+# Aggregation
 # ---------------------------------------------------------------------------
 
 
@@ -615,7 +624,7 @@ class UmaAgg:
     key: object
     name: str
     races: List[UmaRace]
-    current: bool = True    # presente nell'ultima sessione (squadra attuale)
+    current: bool = True    # present in the latest session (current team)
 
     @property
     def tcid(self) -> int:
@@ -623,7 +632,7 @@ class UmaAgg:
 
     @property
     def label(self) -> str:
-        return self.name if self.current else f"{self.name} (ex)"
+        return self.name if self.current else f"{self.name} (former)"
 
     @property
     def n(self) -> int:
@@ -645,9 +654,6 @@ class UmaAgg:
     def avg(self, attr: str):
         return safe_mean([getattr(r, attr) for r in self.races])
 
-    def rate(self, pred) -> float:
-        return sum(1 for r in self.races if pred(r)) / self.n if self.n else 0.0
-
     def count(self, pred) -> int:
         return sum(1 for r in self.races if pred(r))
 
@@ -655,17 +661,9 @@ class UmaAgg:
     def multiplier(self) -> float:
         return safe_mean([m for r in self.races for m in r.multipliers], 1.0)
 
-    @property
-    def base_multiplier(self) -> float:
-        """Moltiplicatore medio escluso il bonus slot 1 (per stimare l'effetto di un cambio di ace)."""
-        ms = [m for r in self.races if not r.is_ace for m in r.multipliers]
-        if ms:
-            return mean(ms)
-        return self.multiplier - 0.10
-
 
 def aggregate_umas(sessions: List[Session]) -> List[UmaAgg]:
-    """Una voce per uma allenata. La squadra attuale e' quella dell'ultima sessione (in ordine di data)."""
+    """One entry per trained uma. The current team is the one in the latest session (by date)."""
     sessions = sorted(sessions, key=lambda s: s.label)
     by: Dict[object, List[UmaRace]] = {}
     for s in sessions:
@@ -674,7 +672,7 @@ def aggregate_umas(sessions: List[Session]) -> List[UmaAgg]:
                 by.setdefault(u.key, []).append(u)
     latest = sessions[-1].label if sessions else None
     aggs = [UmaAgg(key, rs[0].name, rs, current=any(r.session == latest for r in rs)) for key, rs in by.items()]
-    # stesso personaggio allenato piu' volte: v1, v2, ... in ordine di prima apparizione
+    # same character trained more than once: v1, v2, ... in order of first appearance
     groups: Dict[str, List[UmaAgg]] = defaultdict(list)
     for a in aggs:
         groups[a.name].append(a)
@@ -687,7 +685,7 @@ def aggregate_umas(sessions: List[Session]) -> List[UmaAgg]:
 
 
 def team_changes(sessions: List[Session], umas: List[UmaAgg]) -> List[dict]:
-    """Differenze di squadra tra una sessione e la precedente: uma entrate, uscite, spostate."""
+    """Team differences between each session and the previous one: umas in, out and moved."""
     labels = {a.key: a.name for a in umas}
     out = []
     prev = None
@@ -708,14 +706,14 @@ def team_changes(sessions: List[Session], umas: List[UmaAgg]) -> List[dict]:
 
 
 def rushed_chance(wiz: int) -> float:
-    """Probabilita' teorica di rushed (kakari) in funzione della Saggezza: ((6,5/log10(0,1*WIT+1))^2)%."""
+    """Theoretical chance of getting rushed given Wit: ((6.5 / log10(0.1*WIT + 1))^2)%."""
     if wiz <= 0:
         return 1.0
     return min(1.0, (6.5 / math.log10(0.1 * wiz + 1)) ** 2 / 100.0)
 
 
 def skill_chance(wiz: int) -> float:
-    """Probabilita' teorica che una skill superi il controllo Saggezza: max(100 - 9000/WIT, 20)%."""
+    """Theoretical chance that a skill passes the Wit check: max(100 - 9000/WIT, 20)%."""
     if wiz <= 0:
         return 0.2
     return max(0.2, 1.0 - 90.0 / wiz)
@@ -797,19 +795,18 @@ class SkillDB:
         return f"{n} [{sid}]" if n else str(sid)
 
     def kind(self, sid: int, observed: Optional[str] = None) -> str:
-        """Tipo in italiano: dal database, altrimenti dal punteggio osservato, altrimenti dall'ID."""
+        """Skill kind: from the database, else from the observed score, else from the ID."""
         if 900000 <= sid < 1000000:
-            return "unica ered."
+            return "inherited"
         r = self.rarity.get(sid)
         if r:
-            return "bianca" if r == 1 else "oro" if r == 2 else "unica"
-        if observed in SKILL_KIND_IT:
-            return SKILL_KIND_IT[observed]
-        return "unica" if 100000 <= sid < 200000 else "?"
+            return "white" if r == 1 else "gold" if r == 2 else "unique"
+        if observed in SKILL_CATS:
+            return observed
+        return "unique" if 100000 <= sid < 200000 else "?"
 
 
-SKILL_KIND_IT = {"unique": "unica", "gold": "oro", "white": "bianca"}
-START_SKILLS = {200431, 200432}  # Concentration (oro) e Focus (bianca): riducono il ritardo in partenza
+START_SKILLS = {200431, 200432}  # Concentration (gold) and Focus (white): shorten the start delay
 
 
 def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
@@ -821,95 +818,95 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     all_ur = [u for r in races for u in r.ours]
     n_races = len(races)
     if not n_races:
-        return "Nessuna gara trovata.\n"
+        return "No races found.\n"
     n_current = sum(1 for a in umas if a.current)
 
-    R.h1("UmaStatsTT - Analisi Team Trials")
-    R.p(f"File analizzati: {len(sessions)}  |  Gare: {n_races}  |  Uma in squadra: {n_current}"
-        + (f" (+{len(umas) - n_current} non piu' in squadra)" if len(umas) > n_current else ""))
+    R.h1("UmaStatsTT - Team Trials analysis")
+    R.p(f"Files analyzed: {len(sessions)}  |  Races: {n_races}  |  Umas on the team: {n_current}"
+        + (f" (+{len(umas) - n_current} no longer on the team)" if len(umas) > n_current else ""))
     bad = [r for r in races if not r.check_ok]
     if bad:
-        R.p(f"ATTENZIONE: in {len(bad)} gare la somma dei punti non coincide con il totale (dati incompleti?).")
+        R.p(f"WARNING: in {len(bad)} races the points do not add up to the total (incomplete data?).")
     if any(u.start_delay is None for u in all_ur):
-        R.p("Nota: alcune gare non hanno il replay (race_scenario): diagnostica HP/skill parziale.")
+        R.p("Note: some races have no replay (race_scenario): HP/skill diagnostics are partial.")
 
     allrates = defaultdict(list)
     for s in sessions:
         for k, v in s.bonus_rates.items():
             allrates[k] += v
-    mult_std = 1 + sum(safe_mean(allrates.get(k, []), 0) for k in ("avversario", "supporto"))
+    mult_std = 1 + sum(safe_mean(allrates.get(k, []), 0) for k in ("opponent", "support"))
     est, notes = make_recommendations(umas, races, all_ur, mult_std, skills)
 
-    R.h2("In sintesi")
-    R.p(f"Media {fi(sum(s.total for s in sessions) / len(sessions))} punti a sessione, "
-        f"{fi(sum(s.total for s in sessions) / n_races)} a gara. Le 5 cose che valgono di piu' "
-        f"(stima in punti finali per sessione):")
+    R.h2("Summary")
+    R.p(f"Average {fi(sum(s.total for s in sessions) / len(sessions))} points per session, "
+        f"{fi(sum(s.total for s in sessions) / n_races)} per race. The 5 things worth the most "
+        f"(estimated final points per session):")
     for gain, text in est[:5]:
         R.bullet(f"[~{fi(gain)}] {text}")
     for _prio, text in [x for x in notes if x[0] == 1]:
         R.bullet(f"[!] {text}")
     R.p()
     if changes:
-        R.p(f"La squadra e' cambiata in {len(changes)} {'sessione' if len(changes) == 1 else 'sessioni'}: "
-            f"i consigli riguardano la squadra attuale, cioe' "
-            f"quella dell'ultima sessione ({sessions[-1].label}). Le uma uscite restano nelle statistiche come '(ex)'.")
+        R.p(f"The team changed in {len(changes)} {plural(len(changes), 'session', 'sessions')}: the advice covers "
+            f"the current team, i.e. the one in the latest session ({sessions[-1].label}). Umas that left stay in "
+            f"the statistics marked '(former)'.")
         R.p()
 
-    # ---------------- Sessioni
-    R.h2("Sessioni")
+    # ---------------- Sessions
+    R.h2("Sessions")
     rows = []
     for s in sessions:
-        opp = safe_mean(s.bonus_rates.get("avversario", []))
-        sup = safe_mean(s.bonus_rates.get("supporto", []))
+        opp = safe_mean(s.bonus_rates.get("opponent", []))
+        sup = safe_mean(s.bonus_rates.get("support", []))
         rows.append([s.label, fi(s.total), f"{s.wins}-{len(s.races) - s.wins}", fi(s.total / max(1, len(s.races))),
                      fi(s.opp_eval), pct(opp, 1), pct(sup, 2)])
     tot = sum(s.total for s in sessions)
-    rows.append(["MEDIA", fi(tot / len(sessions)), ff(sum(s.wins for s in sessions) / len(sessions), 1) + " V",
+    rows.append(["AVERAGE", fi(tot / len(sessions)), ff(sum(s.wins for s in sessions) / len(sessions), 1) + " W",
                  fi(tot / n_races), "", "", ""])
-    R.table(["Sessione", "Punteggio", "V-S", "Media/gara", "Valut. avv.", "Bonus avv.", "Bonus supp."], rows)
+    R.table(["Session", "Score", "W-L", "Per race", "Opp. rating", "Opp. bonus", "Support"], rows)
     if changes:
-        R.p("Cambi di squadra:")
+        R.p("Team changes:")
         for c in changes:
             parts = []
             if c["entered"]:
-                parts.append("entrano " + ", ".join(c["entered"]))
+                parts.append("in: " + ", ".join(c["entered"]))
             if c["left"]:
-                parts.append("escono " + ", ".join(c["left"]))
+                parts.append("out: " + ", ".join(c["left"]))
             if c["moved"]:
-                parts.append("spostate " + ", ".join(c["moved"]))
+                parts.append("moved: " + ", ".join(c["moved"]))
             R.bullet(f"{c['session']}: " + "; ".join(parts))
         R.p()
 
-    # ---------------- Come si calcola il punteggio
-    R.h2("Come si forma il punteggio (ricavato dai tuoi dati)")
-    R.p("Punteggio gara = somma dei punti base di ogni evento x (1 + bonus) + bonus squadra.")
+    # ---------------- How the score works
+    R.h2("How the score is built (derived from your data)")
+    R.p("Race score = sum of each event's base points x (1 + bonuses) + team bonus.")
     sup_cfg = sorted({s.support_bonus for s in sessions if s.support_bonus})
-    for k in ("avversario", "supporto", "ace", "serie"):
-        if k == "supporto" and sup_cfg:
+    for k in ("opponent", "support", "ace", "streak"):
+        if k == "support" and sup_cfg:
             R.bullet(f"{BONUS_LABELS[k]}: " + ", ".join(pct(v / 10000, 2) for v in sup_cfg) +
-                     " (valore support_card_bonus del file)")
+                     " (support_card_bonus value in the file)")
             continue
         if allrates.get(k):
             vals = allrates[k]
             rng = f"{pct(min(vals), 1)} - {pct(max(vals), 1)}" if max(vals) - min(vals) > 0.002 else pct(mean(vals), 1)
             R.bullet(f"{BONUS_LABELS.get(k, k)}: {rng}")
     R.p()
-    R.p(f"=> 1 punto base vale circa {ff(mult_std, 2)} punti finali ({ff(mult_std + 0.10, 2)} per l'uma nello slot 1).")
-    R.p("   Tutti i bonus sono percentuali: per salire conta aumentare i PUNTI BASE.")
-    if allrates.get("avversario") and len(sessions) > 1:
-        pairs = sorted((s.opp_eval or 0, safe_mean(s.bonus_rates.get("avversario", []), 0)) for s in sessions)
-        R.p("   Bonus avversario per valutazione avversario: " +
+    R.p(f"=> 1 base point is worth about {ff(mult_std, 2)} final points ({ff(mult_std + 0.10, 2)} for the uma in slot 1).")
+    R.p("   Every bonus is a percentage: to go up, raise your BASE POINTS.")
+    if allrates.get("opponent") and len(sessions) > 1:
+        pairs = sorted((s.opp_eval or 0, safe_mean(s.bonus_rates.get("opponent", []), 0)) for s in sessions)
+        R.p("   Opponent bonus by opponent rating: " +
             ", ".join(f"{fi(e)} -> {pct(r, 1)}" for e, r in pairs) +
-            "  (avversari piu' forti = moltiplicatore piu' alto).")
+            "  (stronger opponents = higher multiplier).")
     R.p()
 
-    # tabella valori per categoria
+    # value per event, by category
     unit_vals = defaultdict(set)
     for u in all_ur:
         for rid, num, raw, _f in u.entries:
             if num:
                 unit_vals[score_category(rid)[0]].add(raw // num)
-    R.p("Valore in punti base di ogni evento (osservato):")
+    R.p("Base points per event (observed):")
     rows = []
     for ck in CATEGORY_ORDER:
         if ck not in unit_vals and ck != "team":
@@ -923,16 +920,17 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
             vs = sorted(unit_vals[ck])
             vals = fi(vs[0]) if len(vs) == 1 else f"{fi(vs[0])} .. {fi(vs[-1])}"
         rows.append([CATEGORY_LABELS[ck], vals])
-    R.table(["Evento", "Punti base"], rows, "lr")
-    R.p("Piazzamento: 1a 10.000, 2a 8.000, 3a 7.000, 4a 6.000, 5a 5.000, 6a-7a 4.000 ... (circa -1.000 a posizione).")
-    R.p("Squadra: tutte e 3 nelle prime 5 = 4.000, tutte e 3 nelle prime 3 = 5.000.")
+    R.table(["Event", "Base points"], rows, "lr")
+    R.p("Finishing position: 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000 ... "
+        "(about -1,000 per place).")
+    R.p("Team: all 3 in the top 5 = 4,000, all 3 in the top 3 = 5,000.")
 
-    # ---------------- Da dove arrivano i punti
-    R.h2("Da dove arrivano i punti")
+    # ---------------- Where the points come from
+    R.h2("Where the points come from")
     cat_raw = Counter()
     cat_final = Counter()
     cat_cnt = Counter()
-    cat_hits = Counter()   # uma-gara in cui la categoria e' presente
+    cat_hits = Counter()   # runs in which the category shows up
     for u in all_ur:
         cat_raw.update(u.cat_raw)
         cat_final.update(u.cat_final)
@@ -952,12 +950,12 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         rows.append([CATEGORY_LABELS[ck], fi(cat_cnt[ck]), f"{cat_hits[ck]}/{denom}",
                      fi(cat_raw[ck]), fi(cat_final[ck]), pct(cat_final[ck] / grand, 1),
                      fi(cat_final[ck] / n_races)])
-    rows.append(["TOTALE", "", "", fi(sum(cat_raw.values())), fi(grand), "100%", fi(grand / n_races)])
-    R.table(["Categoria", "Eventi", "Presente", "Base tot.", "Finali tot.", "% tot.", "Finali/gara"], rows)
-    R.p("'Presente' = in quante uma-gare (o gare, per la squadra) la categoria compare almeno una volta.")
+    rows.append(["TOTAL", "", "", fi(sum(cat_raw.values())), fi(grand), "100%", fi(grand / n_races)])
+    R.table(["Category", "Events", "Present", "Base total", "Final total", "% total", "Final/race"], rows)
+    R.p("'Present' = in how many runs (one uma in one race; for the team bonus: races) the category shows up.")
 
-    # ---------------- Per distanza
-    R.h2("Per distanza")
+    # ---------------- By distance
+    R.h2("By distance")
     rows = []
     for dt in sorted({r.dist_type for r in races}):
         rs = [r for r in races if r.dist_type == dt]
@@ -967,33 +965,33 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
                      f"{sum(r.win for r in rs)}-{sum(not r.win for r in rs)}",
                      fi(mean(r.total for r in rs)), ff(mean(u.finish for u in urs), 1),
                      f"{sum(1 for r in rs if r.team_ids)}/{len(rs)}",
-                     f"{sum(1 for r in rs if r.winner_side == 'noi')}/{len(rs)}"])
-    R.table(["Distanza", "Percorsi", "Gare", "V-S", "Punti/gara", "Piazz. medio", "Bonus squadra", "1a nostra"], rows)
-    consistent = sum(1 for r in races if r.win == (r.winner_side == "noi"))
+                     f"{sum(1 for r in rs if r.winner_side == 'us')}/{len(rs)}"])
+    R.table(["Distance", "Courses", "Races", "W-L", "Points/race", "Avg place", "Team bonus", "Our 1st"], rows)
+    consistent = sum(1 for r in races if r.win == (r.winner_side == "us"))
     if consistent == n_races:
-        R.p(f"Osservazione: in tutte le {n_races} gare ha vinto la squadra che ha piazzato l'uma al 1o posto.")
+        R.p(f"Observation: in all {n_races} races, the team with the 1st-place uma won the race.")
     else:
-        R.p(f"Osservazione: vittoria = squadra con la 1a classificata in {consistent}/{n_races} gare.")
+        R.p(f"Observation: the race went to the team with the 1st-place uma in {consistent}/{n_races} races.")
 
-    # ---------------- Per uma: rendimento
-    R.h2("Rendimento per uma")
+    # ---------------- Per uma: performance
+    R.h2("Performance by uma")
     rows = []
     for a in umas:
         rows.append([a.label, a.dist_label, STYLE_NAMES.get(a.last.style, "?"),
-                     ("ex" if not a.current else "ACE" if a.last.slot == 1 else str(a.last.slot)), a.n,
+                     ("former" if not a.current else "ACE" if a.last.slot == 1 else str(a.last.slot)), a.n,
                      ff(a.avg("finish"), 1), " ".join(str(r.finish) for r in a.races),
                      fi(a.avg("raw")), fi(a.avg("final")),
                      fi(safe_mean([r.cat_raw["place"] for r in a.races])),
                      fi(safe_mean([sum(r.cat_raw[k] for k in SKILL_CATS) for r in a.races])),
                      fi(safe_mean([r.cat_raw["start"] + r.cat_raw["lead16"] + r.cat_raw["lead23"] for r in a.races])),
                      fi(safe_mean([r.cat_raw["rushed"] for r in a.races]))])
-    R.table(["Uma", "Dist.", "Stile", "Slot", "Gare", "Piaz.", "Arrivi", "Base/g", "Finali/g",
-             "Piazz.", "Skill", "Pos/part.", "Rushed"], rows, "lllrrrlrrrrrr")
-    R.p("Colonne Piazz./Skill/Pos-part./Rushed = punti base medi per gara da: piazzamento, skill,")
-    R.p("partenza perfetta + 1a del proprio stile (1/6 e 2/3), penalita' rushed.")
+    R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Finishes", "Base/r", "Final/r",
+             "Placing", "Skills", "Pos/start", "Rushed"], rows, "lllrrrlrrrrrr")
+    R.p("Placing/Skills/Pos-start/Rushed columns = average base points per race from: finishing position,")
+    R.p("skills, perfect start + leading own strategy (1/6 and 2/3), rushed penalty.")
 
-    # ---------------- Per uma: diagnostica
-    R.h2("Diagnostica per uma")
+    # ---------------- Per uma: diagnostics
+    R.h2("Diagnostics by uma")
     rows = []
     for a in umas:
         n = a.n
@@ -1014,15 +1012,15 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
             pct(hp_end),
             pct(safe_mean([r.blocked_late for r in a.races])),
         ])
-    R.table(["Uma", "Bianche/g", "Oro/g", "Unica", "Part.perf", "1a stile 1/6", "1a stile 2/3",
-             "Rushed", "HP finita", "Sprint tardo", "HP fine", "Bloccata"], rows)
-    R.p("Unica = gare con skill unica attivata (Lx = livello).")
-    R.p("HP finita = HP a zero prima del traguardo. Sprint tardo = sprint finale partito >10 m dopo i 2/3")
-    R.p("(segno di stamina insufficiente). HP fine = HP residua media all'arrivo. Bloccata = % di tempo")
-    R.p("con un'uma davanti che blocca, nell'ultimo terzo di gara.")
+    R.table(["Uma", "White/r", "Gold/r", "Unique", "Perf.start", "Lead 1/6", "Lead 2/3",
+             "Rushed", "Out of HP", "Late spurt", "HP left", "Blocked"], rows)
+    R.p("Unique = races in which the unique skill fired (Lx = level).")
+    R.p("Out of HP = HP hit zero before the finish. Late spurt = final spurt started >10 m after the 2/3 mark")
+    R.p("(a sign of too little stamina). HP left = average HP remaining at the finish. Blocked = % of time")
+    R.p("with an uma ahead blocking the way, in the last third of the race.")
 
-    # ---------------- Statistiche e attitudini
-    R.h2("Statistiche e attitudini")
+    # ---------------- Stats and aptitudes
+    R.h2("Stats and aptitudes")
     rows = []
     for a in umas:
         u = a.last
@@ -1032,13 +1030,13 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
                      pct(skill_chance(u.stats["wiz"])), pct(rushed_chance(u.stats["wiz"])),
                      " ".join(MOOD_NAMES.get(r.mood, "?")[:3] for r in a.races)])
     R.table(["Uma"] + [lbl for _, lbl in STAT_KEYS] +
-            ["Apt.dist", "Apt.terr", "Apt.stile", "Skill ok", "Rushed", "Umore per gara"], rows,
+            ["Apt.dist", "Apt.track", "Apt.style", "Skill ok", "Rushed", "Mood per race"], rows,
             "lrrrrrrrrrrl")
-    R.p("Skill ok / Rushed = probabilita' teoriche date dalla WIT: attivazione di una skill")
-    R.p("(max(100 - 9000/WIT, 20)%) e rushed ((6,5 / log10(WIT/10 + 1))^2 %). Attitudine sotto A = penalita'.")
+    R.p("Skill ok / Rushed = theoretical chances from WIT: a skill firing")
+    R.p("(max(100 - 9000/WIT, 20)%) and getting rushed ((6.5 / log10(WIT/10 + 1))^2 %). Aptitude below A = penalty.")
 
-    # ---------------- Noi vs avversari
-    R.h2("Noi contro gli avversari (statistiche medie per distanza)")
+    # ---------------- Us vs opponents
+    R.h2("Us vs opponents (average stats by distance)")
     rows = []
     for dt in sorted({r.dist_type for r in races}):
         rs = [r for r in races if r.dist_type == dt]
@@ -1053,39 +1051,39 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         cells.append(ff(mean(u.finish for r in rs for u in r.ours), 1) + " / " +
                      ff(mean(o.finish for r in rs for o in r.opponents), 1))
         rows.append(cells)
-    R.table(["Distanza"] + [f"{lbl} noi/avv" for _, lbl in STAT_KEYS] + ["Piazz. noi/avv"], rows)
+    R.table(["Distance"] + [f"{lbl} us/opp" for _, lbl in STAT_KEYS] + ["Place us/opp"], rows)
     lost = [r for r in races if not r.win]
     if lost:
-        R.p("Chi ha vinto le gare perse:")
+        R.p("Who won the races you lost:")
         for r in lost:
             w = next((o for o in r.opponents if o.finish == 1), None)
             if w:
                 st = " ".join(f"{lbl} {w.stats[k]}" for k, lbl in STAT_KEYS)
                 best = min(r.ours, key=lambda u: u.finish)
-                R.bullet(f"{r.session} G{r.rnd} {DIST_NAMES.get(r.dist_type)} {r.distance or ''}m: "
-                         f"{w.name} ({STYLE_NAMES.get(w.style, '?')}) {st}  | nostra migliore: "
-                         f"{best.name} {best.finish}a")
+                R.bullet(f"{r.session} R{r.rnd} {DIST_NAMES.get(r.dist_type)} {r.distance or ''}m: "
+                         f"{w.name} ({STYLE_NAMES.get(w.style, '?')}) {st}  | your best: "
+                         f"{labels.get(best.key, best.name)} {ordinal(best.finish)}")
             else:
-                R.bullet(f"{r.session} G{r.rnd} {DIST_NAMES.get(r.dist_type)}: vinta da un'uma fuori squadra")
+                R.bullet(f"{r.session} R{r.rnd} {DIST_NAMES.get(r.dist_type)}: won by an uma outside both teams")
         R.p()
 
-    # ---------------- Umore
-    R.h2("Fattori casuali")
+    # ---------------- Mood
+    R.h2("Random factors")
     rows = []
     for m in sorted({u.mood for u in all_ur}):
         us = [u for u in all_ur if u.mood == m]
         rows.append([MOOD_NAMES.get(m, m), len(us), ff(mean(u.finish for u in us), 1), fi(mean(u.raw for u in us))])
-    R.table(["Umore", "Uma-gare", "Piazz. medio", "Base medi"], rows)
+    R.table(["Mood", "Runs", "Avg place", "Avg base"], rows)
     starts = [u.start_delay for u in all_ur if u.start_delay is not None]
     if starts:
         perf = sum(1 for d in starts if d < 0.02)
-        R.p(f"Partenze perfette (<0,02 s): {perf}/{len(starts)} ({pct(perf / len(starts))}); ritardo medio "
-            f"{ff(mean(starts), 3)} s. Senza skill di partenza ci si aspetta circa il 20%.")
+        R.p(f"Perfect starts (<0.02 s): {perf}/{len(starts)} ({pct(perf / len(starts))}); average delay "
+            f"{ff(mean(starts), 3)} s. Without start skills you can expect about 20%.")
 
-    # ---------------- Skill
-    R.h2("Skill")
-    R.p("Ogni attivazione vale punti base: bianca/ereditata 500, oro 1.200, unica 2.300-2.500 (sale col livello).")
-    R.p("Anche le skill passive (verdi) che si attivano al via contano come attivazioni.")
+    # ---------------- Skills
+    R.h2("Skills")
+    R.p("Every activation is worth base points: white/inherited 500, gold 1,200, unique 2,300-2,500 (grows with level).")
+    R.p("Passive (green) skills that fire at the start count as activations too.")
     R.p()
     for a in umas:
         owned = {}
@@ -1099,138 +1097,138 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
             types.update(r.skill_type)
             pts.update(r.skill_points)
         never = [sid for sid in owned if acts[sid] == 0]
-        line = (f"{a.label}: {len(owned)} skill, attivazioni medie {ff(sum(acts[s] for s in owned) / a.n, 1)}/gara, "
-                f"punti base da skill {fi(sum(pts.values()) / a.n)}/gara.")
+        line = (f"{a.label}: {len(owned)} skills, {ff(sum(acts[s] for s in owned) / a.n, 1)} activations per race, "
+                f"{fi(sum(pts.values()) / a.n)} base points from skills per race.")
         R.p(line)
         if never:
-            R.p(f"    Mai attivate in {a.n} gare: " +
+            R.p(f"    Never fired in {a.n} {plural(a.n, 'race', 'races')}: " +
                 ", ".join(f"{skills.label(s)} ({skills.kind(s, types.get(s))})" for s in sorted(never)))
-        if args.skill:
+        if args.skills:
             rows = []
             for sid in sorted(owned, key=lambda s: (-acts[s], s)):
                 rows.append([skills.name(sid) or "?", sid, skills.kind(sid, types.get(sid)), f"L{owned[sid]}",
                              f"{acts[sid]}/{a.n}", fi(pts[sid])])
-            R.table(["Skill", "ID", "Tipo", "Liv.", "Attivazioni", "Punti base"], rows, "lrllrr")
+            R.table(["Skill", "ID", "Kind", "Lvl", "Activations", "Base points"], rows, "lrllrr")
     all_ids = {sid for u in all_ur for sid in u.skills_owned}
     unnamed = sorted(sid for sid in all_ids if not skills.name(sid))
     if unnamed:
         R.p()
-        R.p(f"({len(unnamed)} skill senza nome nel database: aggiornalo con --aggiorna-nomi.)")
+        R.p(f"({len(unnamed)} skills have no name in the database: refresh it with --update-names.)")
 
-    # ---------------- Priorita'
-    R.h2("Cosa migliorare (priorita' stimate)")
-    R.p(f"Stime in punti FINALI per sessione (5 gare); 1 punto base ~ {ff(mult_std, 2)} finali. Ordinate per guadagno.")
+    # ---------------- Priorities
+    R.h2("What to improve (estimated priorities)")
+    R.p(f"Estimates in FINAL points per session (5 races); 1 base point ~ {ff(mult_std, 2)} final. Sorted by gain.")
     R.p()
     for gain, text in est:
         R.bullet(f"[~{fi(gain)}] {text}")
     R.p()
-    R.p("Altre indicazioni (non quantificabili):")
+    R.p("Other notes (not quantifiable):")
     for _prio, text in notes:
         R.bullet(text)
     R.p()
 
-    # ---------------- Dettaglio gare
-    if args.dettaglio:
-        R.h2("Dettaglio gare")
+    # ---------------- Race details
+    if args.details:
+        R.h2("Race details")
         for s in sessions:
             for r in s.races:
-                res = "VINTA" if r.win else "persa"
-                R.p(f"{s.label} - G{r.rnd} {DIST_NAMES.get(r.dist_type)} {r.distance or '?'}m "
+                res = "WON" if r.win else "lost"
+                R.p(f"{s.label} - R{r.rnd} {DIST_NAMES.get(r.dist_type)} {r.distance or '?'}m "
                     f"({WEATHER_NAMES.get(r.weather, '?')}, {GROUND_NAMES.get(r.ground, '?')}) - {res} - "
-                    f"{fi(r.total)} punti" + (f" (bonus squadra {fi(r.team_final)})" if r.team_final else ""))
+                    f"{fi(r.total)} points" + (f" (team bonus {fi(r.team_final)})" if r.team_final else ""))
                 rows = []
                 for u in sorted(r.ours, key=lambda x: x.finish):
-                    notes = []
+                    tags = []
                     if u.rushed:
-                        notes.append(f"rushed {u.rushed_secs}s")
+                        tags.append(f"rushed {u.rushed_secs}s")
                     if u.hp_zero_left:
-                        notes.append(f"HP finita a {fi(u.hp_zero_left)}m")
+                        tags.append(f"out of HP {fi(u.hp_zero_left)}m out")
                     if u.spurt_late and u.spurt_late > 10:
-                        notes.append(f"sprint +{fi(u.spurt_late)}m")
+                        tags.append(f"spurt +{fi(u.spurt_late)}m")
                     if u.cat_count["start"]:
-                        notes.append("partenza perfetta")
+                        tags.append("perfect start")
                     if u.cat_count["margin"]:
-                        notes.append("margine")
+                        tags.append("margin")
                     if u.cat_count["upset"]:
-                        notes.append("sorpresa")
+                        tags.append("upset")
                     if u.cat_count["time"]:
-                        notes.append("bonus tempo")
+                        tags.append("time bonus")
                     rows.append([labels.get(u.key, u.name), ("ACE" if u.is_ace else u.slot), u.finish, u.popularity,
                                  MOOD_NAMES.get(u.mood, "?"), fi(u.raw), fi(u.final),
                                  f"{u.cat_count['white']}/{u.cat_count['gold']}/{u.cat_count['unique']}",
-                                 ", ".join(notes)])
+                                 ", ".join(tags)])
                 for o in sorted(r.opponents, key=lambda x: x.finish):
-                    rows.append([f"  avv. {o.name}", o.slot, o.finish, "", "", "", "", "", STYLE_NAMES.get(o.style, "")])
-                R.table(["Uma", "Slot", "Arr.", "Pop.", "Umore", "Base", "Finali", "Sk b/o/u", "Note"], rows,
+                    rows.append([f"  opp. {o.name}", o.slot, o.finish, "", "", "", "", "", STYLE_NAMES.get(o.style, "")])
+                R.table(["Uma", "Slot", "Fin.", "Pop.", "Mood", "Base", "Final", "Sk w/g/u", "Notes"], rows,
                         "lrrrlrrrl")
 
-    R.h2("Legenda: eventi che danno punti base")
+    R.h2("Legend: events that give base points")
     for line in LEGEND:
         R.bullet(line)
     R.p()
-    R.p("Regole ricavate confrontando ogni evento di punteggio con il replay della gara;")
-    R.p("quelle marcate '(dedotto)' si basano su pochi casi.")
+    R.p("Rules derived by matching every score event against the race replay;")
+    R.p("those marked '(inferred)' are based on few cases.")
     return R.render()
 
 
 def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[UmaRace], mult: float,
                          skills: Optional[SkillDB] = None) -> Tuple[List[Tuple[float, str]], List[Tuple[int, str]]]:
-    """Restituisce (stime, note).
+    """Returns (estimates, notes).
 
-    stime = [(guadagno stimato in punti FINALI per sessione, testo)]
-    note  = [(priorita', testo)] per le indicazioni non quantificabili.
+    estimates = [(estimated gain in FINAL points per session, text)]
+    notes     = [(priority, text)] for advice that cannot be quantified.
     """
     skills = skills or SkillDB()
     est: List[Tuple[float, str]] = []
     notes: List[Tuple[int, str]] = []
     n_sessions = max(1, len({r.session for r in races}))
     labels = {a.key: a.label for a in umas}
-    # i consigli riguardano solo la squadra attuale (ultima sessione); lo storico resta nelle statistiche
+    # advice covers only the current team (latest session); history stays in the statistics
     cur = [a for a in umas if a.current] or umas
 
     for a in cur:
         n = a.n
         m = a.multiplier
         st = a.last.stats
-        per_session = 1  # ogni uma della squadra corre una gara a sessione
+        per_session = 1  # every uma on the team runs one race per session
 
-        # Attitudini sotto A
+        # Aptitudes below A
         u = a.last
         bad = []
         if u.apt_dist is not None and u.apt_dist < 7:
-            bad.append(f"distanza {APT_LETTERS.get(u.apt_dist, '?')} (velocita' ridotta)")
+            bad.append(f"distance aptitude {APT_LETTERS.get(u.apt_dist, '?')} (lower speed)")
         if u.apt_ground is not None and u.apt_ground < 7:
-            bad.append(f"terreno {APT_LETTERS.get(u.apt_ground, '?')}")
+            bad.append(f"track aptitude {APT_LETTERS.get(u.apt_ground, '?')}")
         if u.apt_style is not None and u.apt_style < 7:
-            bad.append(f"stile {APT_LETTERS.get(u.apt_style, '?')}")
+            bad.append(f"strategy aptitude {APT_LETTERS.get(u.apt_style, '?')}")
         if bad:
-            notes.append((1, f"{a.name} ({a.dist_label}): attitudine {', '.join(bad)}. Sotto A c'e' una penalita' "
-                             f"in gara: meglio un'uma con A/S in questa categoria, o alzarla con l'ereditarieta'."))
+            notes.append((1, f"{a.name} ({a.dist_label}): {', '.join(bad)}. Below A there is a race "
+                             f"penalty: better an uma with A/S for this category, or raise it through inheritance."))
 
-        # Stamina insufficiente
+        # Not enough stamina
         short = [r for r in a.races if r.stamina_short]
         if short:
             where = ", ".join(sorted({f"{r.distance}m" for r in short if r.distance}))
             causes = []
             if any(r.hp_zero_left and r.hp_zero_left > 10 for r in short):
                 left = safe_mean([r.hp_zero_left for r in short if r.hp_zero_left and r.hp_zero_left > 10])
-                causes.append(f"HP finita prima del traguardo (in media a {fi(left)} m dall'arrivo)")
+                causes.append(f"ran out of HP before the finish (on average {fi(left)} m out)")
             if any(r.spurt_late and r.spurt_late > 10 for r in short):
-                causes.append("sprint finale partito in ritardo")
+                causes.append("started the final spurt late")
             rushed_too = sum(1 for r in short if r.rushed)
-            extra = f", {rushed_too} con rushed" if rushed_too else ""
+            extra = f", {rushed_too} with rushed" if rushed_too else ""
             gain = len(short) / n * 1000 * m * per_session
-            est.append((gain, f"{a.name}: stamina insufficiente in {len(short)}/{n} gare ({where}{extra}): "
-                              f"{' e '.join(causes)}. STA {st['stamina']}: piu' Resistenza o skill di recupero "
-                              f"(stima: ~1 posizione = 1.000 base)."))
+            est.append((gain, f"{a.name}: not enough stamina in {len(short)}/{n} races ({where}{extra}): "
+                              f"{' and '.join(causes)}. STA {st['stamina']}: more Stamina or recovery skills "
+                              f"(estimate: ~1 place = 1,000 base)."))
         else:
             hp_end = safe_mean([r.hp_end_pct for r in a.races])
             if hp_end is not None and hp_end >= 0.15 and n >= 2:
-                notes.append((3, f"{a.name}: arriva in media con il {pct(hp_end)} di HP e non resta mai a secco: "
-                                 f"STA {st['stamina']} forse in eccesso, nei prossimi allenamenti punti spostabili "
-                                 f"su SPD/POW."))
+                notes.append((3, f"{a.name}: finishes with {pct(hp_end)} HP on average and never runs dry: "
+                                 f"STA {st['stamina']} is probably more than needed; in future training you can "
+                                 f"move points to SPD/POW."))
 
-        # Skill unica poco attivata (servono almeno 2 gare per parlarne)
+        # Unique skill rarely fires (needs at least 2 races to say)
         if n >= 2 and any(r.has_unique for r in a.races):
             k = a.count(lambda r: r.cat_count["unique"] > 0)
             if k / n < 0.6:
@@ -1238,31 +1236,30 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                 uid = next((sid for sid in a.last.skills_owned if 100000 <= sid < 200000), None)
                 uname = f" \"{skills.name(uid)}\"" if uid and skills.name(uid) else ""
                 est.append(((1 - k / n) * val * m * per_session,
-                            f"{a.name}: skill unica{uname} attivata solo {k}/{n} volte ({fi(val)} base ciascuna): le sue "
-                            f"condizioni (posizione/fase di gara) si verificano di rado con stile e distanza attuali."))
+                            f"{a.name}: unique skill{uname} fired only {k}/{n} times ({fi(val)} base each): its "
+                            f"conditions (position/race phase) rarely happen with the current strategy and distance."))
 
-        # Rushed frequente per la singola uma
+        # Frequent rushed for this uma
         k = a.count(lambda r: r.rushed)
         if k >= 2 or (n >= 2 and k / n >= 0.4):
             loss = sum(r.rushed_loss for r in a.races) / n
             wiz = st["wiz"]
-            hint = ("alzare la Saggezza riduce il rischio" if wiz < 1200
-                    else "la Saggezza e' gia' alta: e' soprattutto sfortuna")
+            hint = "raising Wit lowers the risk" if wiz < 1200 else "Wit is already high: it is mostly bad luck"
             est.append((loss * m * per_session,
-                        f"{a.name}: rushed in {k}/{n} gare (-{fi(loss)} base a gara di penalita', piu' HP sprecata). "
-                        f"WIT {wiz}, rischio teorico ~{pct(rushed_chance(wiz))}: {hint}."))
+                        f"{a.name}: rushed in {k}/{n} races (-{fi(loss)} base per race in penalties, plus wasted HP). "
+                        f"WIT {wiz}, theoretical risk ~{pct(rushed_chance(wiz))}: {hint}."))
 
-    # Rushed complessivo
+    # Rushed overall
     rushed_ur = [u for u in all_ur if u.rushed]
     if rushed_ur:
         loss = sum(u.rushed_loss * safe_mean(u.multipliers, mult) for u in rushed_ur) / n_sessions
         risky = sorted(cur, key=lambda a: a.last.stats["wiz"])[:4]
-        est.append((loss, f"Rushed in {len(rushed_ur)}/{len(all_ur)} uma-gare: ~{fi(loss)} finali persi a sessione "
-                          f"solo di penalita' (l'HP sprecata costa anche posizioni). Rischio teorico piu' alto: "
+        est.append((loss, f"Rushed in {len(rushed_ur)}/{len(all_ur)} runs: ~{fi(loss)} final points lost per "
+                          f"session in penalties alone (the wasted HP also costs places). Highest theoretical risk: "
                           + ", ".join(f"{a.name} (WIT {a.last.stats['wiz']}, ~{pct(rushed_chance(a.last.stats['wiz']))})"
                                       for a in risky) + "."))
 
-    # Saggezza bassa -> skill che non superano il controllo di attivazione
+    # Low Wit -> skills that fail the activation check
     target = 1000
     wit_items = []
     for a in cur:
@@ -1279,11 +1276,12 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     if wit_items:
         gain = sum(g for g, _a, _p in wit_items)
         wit_items.sort(key=lambda x: -x[0])
-        est.append((gain, f"Saggezza bassa = meno skill attivate (controllo WIT, prob. teorica): "
+        est.append((gain, f"Low Wit = fewer skills firing (Wit check, theoretical chance): "
                           + ", ".join(f"{a.name} WIT {a.last.stats['wiz']} ~{pct(p)}" for _g, a, p in wit_items[:5])
-                          + f". Portandola a {fi(target)} (~{pct(skill_chance(target))}) stima ~{fi(gain)} a sessione."))
+                          + f". Raising it to {fi(target)} (~{pct(skill_chance(target))}) is worth ~{fi(gain)} "
+                            f"per session."))
 
-    # Slot 1 (+10%): va all'uma che fa piu' punti base nella sua distanza
+    # Slot 1 (+10%): give it to the uma scoring the most base points in its distance
     by_dist: Dict[int, List[UmaAgg]] = defaultdict(list)
     for a in cur:
         by_dist[a.last.dist_type].append(a)
@@ -1293,11 +1291,11 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
         if ace and best is not ace and best.n >= 2 and ace.n >= 2:
             diff = best.avg("raw") - ace.avg("raw")
             est.append((0.10 * diff,
-                        f"{DIST_NAMES.get(dt)}: metti {best.name} come prima uma (slot 1) al posto di {ace.name} "
-                        f"({fi(best.avg('raw'))} vs {fi(ace.avg('raw'))} base medi): il +10% rende di piu' "
-                        f"sull'uma che fa piu' punti."))
+                        f"{DIST_NAMES.get(dt)}: put {best.name} first (slot 1) instead of {ace.name} "
+                        f"({fi(best.avg('raw'))} vs {fi(ace.avg('raw'))} average base): the +10% pays more on "
+                        f"the uma that scores more."))
 
-    # Bonus squadra mancato: chi resta fuori dalle prime 5?
+    # Missed team bonus: who stays out of the top 5?
     missed = [r for r in races if not r.team_ids]
     if missed:
         culprits = Counter()
@@ -1308,56 +1306,56 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
         team_mult = safe_mean([r.team_final / r.team_raw for r in races if r.team_raw], mult)
         gain = len(missed) / n_sessions * 4000 * team_mult
         who = ", ".join(f"{nm} ({c})" for nm, c in culprits.most_common(4))
-        est.append((gain, f"Bonus squadra (tutte e 3 nelle prime 5 = 4.000 base) mancato in {len(missed)}/{len(races)} "
-                          f"gare: vale fino a ~{fi(gain)} a sessione."
-                          + (f" Gare perse per una sola uma fuori dalle prime 5: {who}." if who else "")))
+        est.append((gain, f"Team bonus (all 3 in the top 5 = 4,000 base) missed in {len(missed)}/{len(races)} "
+                          f"races: worth up to ~{fi(gain)} per session."
+                          + (f" Races missed because of a single uma outside the top 5: {who}." if who else "")))
 
-    # Partenze perfette
+    # Perfect starts
     starts = [u for u in all_ur if u.start_delay is not None]
     if starts:
         rate = sum(1 for u in starts if u.cat_count["start"]) / len(starts)
         per_session = len(all_ur) / n_sessions
         gain = max(0.0, 0.5 - rate) * 1000 * mult * per_session
-        # chi ha una skill di partenza (Concentration / Focus) e con che risultati
+        # who has a start skill (Concentration / Focus) and how it went
         groups = []
-        for sid in sorted(START_SKILLS):  # la prima (oro) ha la precedenza se un'uma le ha entrambe
+        for sid in sorted(START_SKILLS):  # the first (gold) wins if an uma has both
             done = {id(u) for _s, g in groups for u in g}
             groups.append((skills.name(sid) or str(sid),
                            [u for u in starts if sid in u.skills_owned and id(u) not in done]))
         done = {id(u) for _s, g in groups for u in g}
-        groups.append(("nessuna delle due", [u for u in starts if id(u) not in done]))
+        groups.append(("neither", [u for u in starts if id(u) not in done]))
         parts = [f"{nm} {sum(1 for u in g if u.cat_count['start'])}/{len(g)} ({', '.join(sorted({labels.get(u.key, u.name) for u in g}))})"
-                 if nm != "nessuna delle due" else f"{nm} {sum(1 for u in g if u.cat_count['start'])}/{len(g)}"
+                 if nm != "neither" else f"{nm} {sum(1 for u in g if u.cat_count['start'])}/{len(g)}"
                  for nm, g in groups if g]
-        detail = " Partenze perfette per skill: " + "; ".join(parts) + "."
+        detail = " Perfect starts by skill: " + "; ".join(parts) + "."
         if gain > 0:
-            est.append((gain, f"Partenza perfetta nel {pct(rate)} dei casi (+1.000 base ognuna). E' casuale (~20% "
-                              f"senza aiuti), ma le skill che riducono il ritardo in partenza la rendono molto piu' "
-                              f"frequente: arrivare al 50% varrebbe ~{fi(gain)} a sessione.{detail}"))
+            est.append((gain, f"Perfect start in {pct(rate)} of runs (+1,000 base each). It is random (~20% "
+                              f"without help), but skills that shorten the start delay make it much more "
+                              f"frequent: reaching 50% would be worth ~{fi(gain)} per session.{detail}"))
 
-    # 1a del proprio stile
+    # Leads own strategy
     l16 = sum(1 for u in all_ur if u.cat_count["lead16"]) / len(all_ur)
     l23 = sum(1 for u in all_ur if u.cat_count["lead23"]) / len(all_ur)
     never_lead = [a.name for a in cur if a.n >= 2 and
                   a.count(lambda r: r.cat_count["lead16"] or r.cat_count["lead23"]) == 0]
-    notes.append((4, f"'1a del proprio stile' (1.000 base a 1/6 e 1.000 a 2/3 di gara) ottenuto nel {pct(l16)} e "
-                     f"{pct(l23)} dei casi" + (f"; mai da: {', '.join(never_lead)}" if never_lead else "") +
-                     ". Conta essere davanti alle altre uma con la STESSA strategia, avversarie comprese."))
+    notes.append((4, f"'Leads own strategy' (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in {pct(l16)} "
+                     f"and {pct(l23)} of runs" + (f"; never by: {', '.join(never_lead)}" if never_lead else "") +
+                     ". What counts is being ahead of every other uma with the SAME strategy, opponents included."))
 
-    # Uma con pochi dati
+    # Umas with little data
     few = [a for a in cur if a.n < 3]
     if few and len(few) < len(cur):
-        notes.append((2, "Poche gare per giudicare con sicurezza: " +
-                      ", ".join(f"{a.name} ({a.n} {'gara' if a.n == 1 else 'gare'})" for a in few) +
-                      ". Le loro statistiche diventano affidabili dopo qualche sessione."))
+        notes.append((2, "Too few races to judge reliably: " +
+                      ", ".join(f"{a.name} ({a.n} {plural(a.n, 'race', 'races')})" for a in few) +
+                      ". Their statistics become reliable after a few sessions."))
 
-    # Piazzamento
+    # Finishing position
     worst = sorted(cur, key=lambda a: -(a.avg("finish") or 0))[:3]
-    notes.append((2, f"Il piazzamento e' la voce principale (~1.000 base, ~{fi(1000 * mult)} finali a posizione; "
-                     f"1a vs 2a = 2.000 base + margine). Piazzamento medio peggiore: "
+    notes.append((2, f"Finishing position is the biggest item (~1,000 base, ~{fi(1000 * mult)} final per place; "
+                     f"1st vs 2nd = 2,000 base + margin). Worst average place: "
                      + ", ".join(f"{a.name} {ff(a.avg('finish'), 1)}" for a in worst) + "."))
 
-    # Skill mai attivate (riassunto; il dettaglio e' nella sezione Skill)
+    # Skills that never fired (summary; details are in the Skills section)
     never_counts = []
     for a in cur:
         owned, acts = {}, Counter()
@@ -1369,10 +1367,10 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
             never_counts.append((nv, a.name))
     if never_counts:
         never_counts.sort(reverse=True)
-        notes.append((5, "Skill mai attivate (vedi sezione Skill): " +
+        notes.append((5, "Skills that never fired (see the Skills section): " +
                          ", ".join(f"{nm} {nv}" for nv, nm in never_counts) +
-                         ". Nei prossimi allenamenti preferisci skill con condizioni che la tua uma soddisfa "
-                         "(ogni attivazione vale 500-1.200 base)."))
+                         ". In future training prefer skills whose conditions your uma actually meets "
+                         "(each activation is worth 500-1,200 base)."))
 
     est.sort(key=lambda x: -x[0])
     notes.sort(key=lambda x: x[0])
@@ -1380,7 +1378,7 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
 
 
 # ---------------------------------------------------------------------------
-# Esportazione CSV
+# CSV export
 # ---------------------------------------------------------------------------
 
 
@@ -1390,14 +1388,14 @@ def export_csv(sessions: List[Session], outdir: str, skills: Optional[SkillDB] =
     written = []
     aggs = aggregate_umas(sessions)
     agg_of = {a.key: a for a in aggs}
-    p1 = os.path.join(outdir, "uma_gare.csv")
+    p1 = os.path.join(outdir, "uma_races.csv")
     with open(p1, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["sessione", "gara", "distanza_tipo", "metri", "vinta", "uma", "in_squadra", "tcid", "slot", "stile",
-                    "SPD", "STA", "POW", "GUT", "WIT", "umore", "popolarita", "arrivo", "punti_base", "punti_finali",
+        w.writerow(["session", "race", "distance_type", "meters", "won", "uma", "on_team", "tcid", "slot", "strategy",
+                    "SPD", "STA", "POW", "GUT", "WIT", "mood", "popularity", "finish", "base_points", "final_points",
                     *[f"base_{k}" for k in CATEGORY_ORDER if k != "team"],
-                    "skill_bianche", "skill_oro", "skill_unica", "ritardo_partenza", "rushed_secondi",
-                    "hp_finale_pct", "hp_finita_m_al_traguardo", "sprint_ritardo_m", "bloccata_pct"])
+                    "white_skills", "gold_skills", "unique_skill", "start_delay", "rushed_seconds",
+                    "hp_left_pct", "hp_out_m_to_finish", "spurt_late_m", "blocked_pct"])
         for s in sessions:
             for r in s.races:
                 for u in r.ours:
@@ -1414,10 +1412,11 @@ def export_csv(sessions: List[Session], outdir: str, skills: Optional[SkillDB] =
                                 "" if u.blocked_late is None else round(100 * u.blocked_late, 1)])
     written.append(p1)
 
-    p2 = os.path.join(outdir, "eventi_punteggio.csv")
+    p2 = os.path.join(outdir, "score_events.csv")
     with open(p2, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["sessione", "gara", "uma", "raw_score_id", "categoria", "descrizione", "volte", "punti_base", "punti_finali"])
+        w.writerow(["session", "race", "uma", "raw_score_id", "category", "description", "times", "base_points",
+                    "final_points"])
         for s in sessions:
             for r in s.races:
                 for u in r.ours:
@@ -1426,11 +1425,11 @@ def export_csv(sessions: List[Session], outdir: str, skills: Optional[SkillDB] =
                         w.writerow([s.label, r.rnd, agg_of[u.key].name, rid, ck, desc, num, raw, fin])
     written.append(p2)
 
-    p3 = os.path.join(outdir, "skill.csv")
+    p3 = os.path.join(outdir, "skills.csv")
     with open(p3, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["uma", "in_squadra", "tcid", "skill_id", "nome", "livello", "tipo", "gare", "attivazioni",
-                    "punti_base"])
+        w.writerow(["uma", "on_team", "tcid", "skill_id", "name", "level", "kind", "races", "activations",
+                    "base_points"])
         for a in aggs:
             owned, acts, types, pts = {}, Counter(), {}, Counter()
             for r in a.races:
@@ -1439,8 +1438,8 @@ def export_csv(sessions: List[Session], outdir: str, skills: Optional[SkillDB] =
                 types.update(r.skill_type)
                 pts.update(r.skill_points)
             for sid in sorted(owned):
-                w.writerow([a.name, int(a.current), a.tcid, sid, skills.name(sid) or "", owned[sid], skills.kind(sid, types.get(sid)),
-                            a.n, acts[sid], pts[sid]])
+                w.writerow([a.name, int(a.current), a.tcid, sid, skills.name(sid) or "", owned[sid],
+                            skills.kind(sid, types.get(sid)), a.n, acts[sid], pts[sid]])
     written.append(p3)
     return written
 
@@ -1455,10 +1454,10 @@ SKILL_SRC_BASE = "https://raw.githubusercontent.com/alpha123/uma-tools/master/um
 
 
 def load_skill_db(*paths: Optional[str]) -> SkillDB:
-    """Carica nomi (e rarita') delle skill. I file successivi sovrascrivono i precedenti.
+    """Loads skill names (and rarity). Later files override earlier ones.
 
-    Formati accettati: {"200012": "Nome"}, {"200012": ["Nome", rarita']},
-    {"200012": {"name_en": "Nome", "rarity": 1}} oppure [{"id": 200012, "name_en": "Nome"}, ...].
+    Accepted formats: {"200012": "Name"}, {"200012": ["Name", rarity]},
+    {"200012": {"name_en": "Name", "rarity": 1}} or [{"id": 200012, "name_en": "Name"}, ...].
     """
     db = SkillDB()
     name_keys = ("name_en", "enname", "name", "name_jp", "jpname")
@@ -1485,7 +1484,7 @@ def load_skill_db(*paths: Optional[str]) -> SkillDB:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            print(f"Nomi skill: impossibile leggere {path}: {e}", file=sys.stderr)
+            print(f"Skill names: cannot read {path}: {e}", file=sys.stderr)
             continue
         if isinstance(data, dict):
             for k, v in data.items():
@@ -1499,11 +1498,11 @@ def load_skill_db(*paths: Optional[str]) -> SkillDB:
 
 
 def build_skill_db(names_raw: dict, data_raw: dict) -> dict:
-    """Unisce skillnames.json e skill_data.json di uma-tools nel formato {id: [nome, rarita']}."""
+    """Merges uma-tools' skillnames.json and skill_data.json into the {id: [name, rarity]} format."""
     out = {
-        "_fonte": "https://github.com/alpha123/uma-tools (umalator-global: skillnames.json + skill_data.json), "
-                  "testi del client Global",
-        "_formato": "id -> [nome, rarita'] con rarita' 1 = bianca, 2 = oro, 3-5 = unica",
+        "_source": "https://github.com/alpha123/uma-tools (umalator-global: skillnames.json + skill_data.json), "
+                   "Global client text",
+        "_format": "id -> [name, rarity] with rarity 1 = white, 2 = gold, 3-5 = unique",
     }
     for k in sorted((k for k in names_raw if str(k).isdigit()), key=int):
         v = names_raw[k]
@@ -1514,7 +1513,7 @@ def build_skill_db(names_raw: dict, data_raw: dict) -> dict:
 
 
 def update_skill_db(path: str = SKILL_DB_FILE) -> int:
-    """Scarica la versione aggiornata dei nomi delle skill e la salva in `path`."""
+    """Downloads the latest skill names and saves them to `path` (and to web/skill_names.js)."""
     import urllib.request
 
     def get(name):
@@ -1530,15 +1529,15 @@ def update_skill_db(path: str = SKILL_DB_FILE) -> int:
 
 
 def write_web_skill_db(db: dict, path: str) -> None:
-    """Stesso contenuto per la webapp, come script (cosi' funziona anche aprendo index.html dal disco)."""
+    """Same content for the web app, as a script (so it also works when index.html is opened from disk)."""
     body = ",\n".join(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in db.items())
     with open(path, "w", encoding="utf-8") as f:
-        f.write("/* Generato da tt_stats.py --aggiorna-nomi: nomi e rarita' delle skill (Global). */\n"
+        f.write("/* Generated by tt_stats.py --update-names: skill names and rarity (Global). */\n"
                 "window.UMA_SKILLS = {\n" + body + "\n};\n")
 
 
 def write_skill_db(db: dict, path: str) -> None:
-    """Una skill per riga, cosi' il file resta leggibile e modificabile a mano."""
+    """One skill per line, so the file stays readable and easy to edit by hand."""
     with open(path, "w", encoding="utf-8") as f:
         f.write("{\n" + ",\n".join(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in db.items())
                 + "\n}\n")
@@ -1557,7 +1556,7 @@ def find_files(paths: List[str]) -> List[str]:
         elif os.path.isfile(p):
             files.append(p)
         else:
-            print(f"Attenzione: '{p}' non trovato", file=sys.stderr)
+            print(f"Warning: '{p}' not found", file=sys.stderr)
     seen, out = set(), []
     for f in files:
         k = os.path.abspath(f)
@@ -1571,43 +1570,43 @@ def find_files(paths: List[str]) -> List[str]:
 
 def main(argv=None) -> int:
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # console Windows
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows console
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="Statistiche dei risultati di Team Trials (Uma Musume).")
-    ap.add_argument("percorsi", nargs="*", help="file JSON o cartelle (default: ./data e cartella corrente)")
-    ap.add_argument("--dettaglio", action="store_true", help="mostra il resoconto di ogni gara")
-    ap.add_argument("--skill", action="store_true", help="tabella completa delle skill per ogni uma")
-    ap.add_argument("--md", metavar="FILE", help="salva il report in Markdown")
-    ap.add_argument("--csv", metavar="CARTELLA", help="esporta i dati in CSV (per Excel/Sheets)")
-    ap.add_argument("--nomi-skill", metavar="FILE",
-                    help="JSON aggiuntivo con i nomi delle skill (id -> nome), ha la precedenza su skill_names.json")
-    ap.add_argument("--aggiorna-nomi", action="store_true",
-                    help="scarica i nomi aggiornati delle skill in skill_names.json (serve internet)")
+    ap = argparse.ArgumentParser(description="Statistics from Uma Musume Team Trials result files.")
+    ap.add_argument("paths", nargs="*", help="JSON files or folders (default: ./data and the current folder)")
+    ap.add_argument("--details", action="store_true", help="show a breakdown of every race")
+    ap.add_argument("--skills", action="store_true", help="full skill table for every uma")
+    ap.add_argument("--md", metavar="FILE", help="also save the report as Markdown")
+    ap.add_argument("--csv", metavar="FOLDER", help="export the data as CSV (for Excel/Sheets)")
+    ap.add_argument("--skill-names", metavar="FILE",
+                    help="extra JSON with skill names (id -> name), takes precedence over skill_names.json")
+    ap.add_argument("--update-names", action="store_true",
+                    help="download the latest skill names into skill_names.json (needs internet)")
     args = ap.parse_args(argv)
 
-    if args.aggiorna_nomi:
+    if args.update_names:
         try:
             n = update_skill_db()
-            print(f"Nomi skill aggiornati: {n} skill salvate in {SKILL_DB_FILE}")
-        except Exception as e:  # rete assente, URL cambiato, ...
-            print(f"Aggiornamento dei nomi non riuscito: {e}", file=sys.stderr)
+            print(f"Skill names updated: {n} skills saved to {SKILL_DB_FILE}")
+        except Exception as e:  # no network, URL changed, ...
+            print(f"Could not update skill names: {e}", file=sys.stderr)
             return 1
-        if not args.percorsi and not os.path.isdir("data"):
+        if not args.paths and not os.path.isdir("data"):
             return 0
 
-    files = find_files(args.percorsi)
+    files = find_files(args.paths)
     sessions = []
     for f in files:
         try:
             sessions.append(load_session(f))
         except (ValueError, KeyError, json.JSONDecodeError) as e:
-            print(f"Salto {f}: {e}", file=sys.stderr)
+            print(f"Skipping {f}: {e}", file=sys.stderr)
     if not sessions:
-        print("Nessun file di Team Trials valido trovato. Passa i file .json o una cartella.", file=sys.stderr)
+        print("No valid Team Trials files found. Pass the .json files or a folder.", file=sys.stderr)
         return 1
     sessions.sort(key=lambda s: s.label)
-    skills = load_skill_db(SKILL_DB_FILE, args.nomi_skill)
+    skills = load_skill_db(SKILL_DB_FILE, args.skill_names)
 
     args.md_mode = False
     print(build_report(sessions, args, skills), end="")
@@ -1615,7 +1614,7 @@ def main(argv=None) -> int:
         args.md_mode = True
         with open(args.md, "w", encoding="utf-8") as f:
             f.write(build_report(sessions, args, skills))
-        print(f"\nReport Markdown salvato in {args.md}")
+        print(f"\nMarkdown report saved to {args.md}")
     if args.csv:
         for p in export_csv(sessions, args.csv, skills):
             print(f"CSV: {p}")

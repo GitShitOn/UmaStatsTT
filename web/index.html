@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>UmaStatsTT</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Analisi dei risultati di Team Trials di Uma Musume: da dove arrivano i punti e cosa migliorare.">
+<meta name="description" content="Uma Musume Team Trials results analysis: where your points come from and what to improve.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=IBM+Plex+Mono:wght@500&family=Instrument+Sans:wght@400;500;600;700&display=swap">
@@ -14,22 +14,22 @@
 <body>
 <header class="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="#top" aria-label="UmaStatsTT, torna all'inizio">
+    <a class="brand" href="#top" aria-label="UmaStatsTT, back to the top">
       <span class="brand-mark" aria-hidden="true">TT</span>
       <span class="brand-name">UmaStatsTT</span>
     </a>
-    <nav class="sections" id="nav" aria-label="Sezioni" hidden>
-      <a href="#sintesi">Sintesi</a>
-      <a href="#punteggio">Punteggio</a>
-      <a href="#distanze">Distanze</a>
-      <a href="#uma">Uma</a>
-      <a href="#avversari">Avversari</a>
-      <a href="#skill">Skill</a>
-      <a href="#gare">Gare</a>
-      <a href="#priorita">Cosa migliorare</a>
-      <a href="#legenda">Legenda</a>
+    <nav class="sections" id="nav" aria-label="Sections" hidden>
+      <a href="#summary">Summary</a>
+      <a href="#scoring">Scoring</a>
+      <a href="#distances">Distances</a>
+      <a href="#umas">Umas</a>
+      <a href="#opponents">Opponents</a>
+      <a href="#skills">Skills</a>
+      <a href="#races">Races</a>
+      <a href="#improve">What to improve</a>
+      <a href="#legend">Legend</a>
     </nav>
-    <label class="btn btn-primary load-btn" for="file-input">Carica file</label>
+    <label class="btn btn-primary load-btn" for="file-input">Load files</label>
     <input id="file-input" type="file" accept=".json,application/json" multiple hidden>
   </div>
 </header>
@@ -38,17 +38,17 @@
   <section id="start" class="start" aria-labelledby="start-title">
     <div class="start-copy">
       <p class="eyebrow">Team Trials · Uma Musume</p>
-      <h1 id="start-title">Scopri dove perdi punti nelle Team Trials</h1>
-      <p class="lead">Carica i file <code>TT-AAAAMMGG_hhmmss.json</code> delle tue sessioni. L'analisi gira nel browser: i file non vengono inviati da nessuna parte.</p>
+      <h1 id="start-title">Find out where you lose points in Team Trials</h1>
+      <p class="lead">Load the <code>TT-YYYYMMDD_hhmmss.json</code> files from your sessions. The analysis runs in your browser: the files are not sent anywhere.</p>
       <ul class="start-points">
-        <li><strong>Da dove arrivano i punti</strong>: piazzamento, skill, partenza, bonus di squadra.</li>
-        <li><strong>Cosa non va in gara</strong>: HP finita prima del traguardo, rushed, skill mai attivate.</li>
-        <li><strong>Cosa migliorare prima</strong>, con una stima dei punti che vale.</li>
+        <li><strong>Where your points come from</strong>: finishing position, skills, starts, team bonus.</li>
+        <li><strong>What goes wrong in races</strong>: running out of HP before the finish, getting rushed, skills that never fire.</li>
+        <li><strong>What to improve first</strong>, with an estimate of how many points it is worth.</li>
       </ul>
     </div>
     <label class="dropzone" for="file-input" id="dropzone">
-      <span class="dropzone-title">Trascina qui i file</span>
-      <span class="dropzone-sub">oppure tocca per sceglierli · puoi caricarne più di uno</span>
+      <span class="dropzone-title">Drop your files here</span>
+      <span class="dropzone-sub">or tap to choose them · you can load several at once</span>
     </label>
   </section>
 
@@ -57,7 +57,7 @@
 </main>
 
 <div id="tooltip" class="tooltip" role="tooltip" hidden></div>
-<div id="drop-overlay" class="drop-overlay" hidden><p>Rilascia i file per analizzarli</p></div>
+<div id="drop-overlay" class="drop-overlay" hidden><p>Drop the files to analyze them</p></div>
 
 <script src="skill_names.js"></script>
 <script src="demo.js"></script>
