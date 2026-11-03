@@ -230,12 +230,35 @@
     </div>`;
   }
 
+  function retrainPanel(A) {
+    const rows = A.retrain;
+    if (!rows || !rows.length) return '';
+    const t = rows[0];
+    const next = rows.slice(1, 3).map((r) => `<li><a href="#uma-${esc(r.key)}">${esc(r.name)}</a> <span class="muted">${esc(r.dist)} · ~${fi(r.loss)}</span></li>`).join('');
+    return `<div class="panel retrain">
+      <p class="eyebrow">Retrain first</p>
+      <div class="retrain-head">
+        <h3><a href="#uma-${esc(t.key)}">${esc(t.name)}</a></h3>
+        ${distChip(t.mainDist, t.dist)}
+        <span class="small muted">${t.n} races${t.preliminary ? ' · preliminary' : ''}</span>
+      </div>
+      <p class="retrain-loss"><strong>~${fi(t.loss)}</strong> final points per session behind your 3 best builds <span class="muted">(${fi(t.own)} from its own placings and skills, ${fi(t.team)} from team bonuses it cost)</span></p>
+      <div class="grid-2">
+        <div><h4>Why</h4><ul class="plain">${t.why.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>
+        ${t.needs.length ? `<div><h4>The new one needs</h4><ul class="plain">${t.needs.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
+      </div>
+      ${next ? `<div class="retrain-next"><span class="small muted">Next in line</span><ul class="plain inline">${next}</ul></div>` : ''}
+      <p class="note">A trained uma’s stats cannot change: the fix is a new training. Ranking by final points lost per session against the average of your 3 best umas, plus the team bonuses lost when it was the only one outside the top 5.</p>
+    </div>`;
+  }
+
   function secSummary(A) {
     const top = A.recs.est.slice(0, 5);
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
     const apt = A.recs.notes.filter((n) => n.prio === 1);
     return `<section class="section" id="summary" aria-labelledby="h-summary">
       ${sectionHead('summary', 'Summary', 'The big picture')}
+      ${retrainPanel(A)}
       ${reliabilityPanel(A)}
       <div class="tiles">
         ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}`)}
@@ -632,6 +655,12 @@
   }
 
   document.addEventListener('click', (e) => {
+    // links to an uma's card open it, since the cards start collapsed
+    const link = e.target.closest ? e.target.closest('a[href^="#uma-"]') : null;
+    if (link) {
+      const card = document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
+      if (card && card.tagName === 'DETAILS') card.open = true;
+    }
     const btn = e.target.closest ? e.target.closest('[data-action]') : null;
     if (!btn) return;
     const a = btn.dataset.action;

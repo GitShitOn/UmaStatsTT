@@ -789,6 +789,96 @@ def reliability_text(rel: dict) -> str:
             f"{plural(need, 'session', 'sessions')} needed.")
 
 
+def retrain_ranking(umas: List[UmaAgg], races: List[Race], mult: float) -> List[dict]:
+    """Current umas ranked by final points lost per session against the team's 3 best builds.
+
+    Loss = (average base points of the best 3 - this uma's) x its multiplier
+         + team bonuses it cost as the only uma outside the top 5.
+    A trained uma's stats cannot change, so the fix for the top of this list is a new training.
+    """
+    cur = [a for a in umas if a.current and a.n >= MIN_RACES]
+    if len(cur) < 2:
+        return []
+    avg = {a.key: a.avg("raw") for a in cur}
+    bench = mean(sorted(avg.values(), reverse=True)[:3])
+    team_mult = safe_mean([r.team_final / r.team_raw for r in races if r.team_raw], mult)
+    culprit = Counter()
+    for r in races:
+        out = [u for u in r.ours if u.finish > 5]
+        if len(out) == 1:
+            culprit[out[0].key] += 1
+    race_of = {(r.session, r.rnd): r for r in races}
+    rows = []
+    for a in cur:
+        n, st, u = a.n, a.last.stats, a.last
+        own = max(0.0, bench - avg[a.key]) * a.multiplier
+        team = culprit[a.key] / n * 4000 * team_mult
+        first = a.count(lambda r: r.finish == 1) / n
+        top5 = a.count(lambda r: r.finish <= 5) / n
+        why = [f"average place {ff(a.avg('finish'), 1)}, 1st in {pct(first)} of its races, top 5 in {pct(top5)}"]
+        needs = []
+        if culprit[a.key]:
+            why.append(f"cost the team bonus {culprit[a.key]} {plural(culprit[a.key], 'time', 'times')} as the only "
+                       f"uma outside the top 5")
+        cat = {1: "Sprint", 2: "Mile", 3: "Medium", 4: "Long"}.get(dist_category_type(u.distance, u.dist_type), "")
+        for apt, what, need in ((u.apt_dist, "distance", f"A or S {cat or 'distance'} aptitude"),
+                                (u.apt_ground, "track", f"A or S {'Dirt' if u.dist_type == 5 else 'Turf'} aptitude"),
+                                (u.apt_style, "strategy", f"A or S {STYLE_NAMES.get(u.style, '')} aptitude")):
+            if apt is not None and apt < 7:
+                why.append(f"{what} aptitude {APT_LETTERS.get(apt, '?')}")
+                needs.append(need)
+        short = a.count(lambda r: r.stamina_short)
+        rushed = a.count(lambda r: r.rushed)
+        if short / n >= 0.2:
+            why.append(f"ran out of stamina in {short}/{n} races")
+        if rushed / n >= 0.15:
+            why.append(f"rushed in {rushed}/{n} races")
+        if a.races[-1].has_unique:
+            k = a.count(lambda r: r.cat_count["unique"] > 0)
+            if k / n < 0.6:
+                why.append(f"unique skill fired in only {k}/{n} races")
+        # stats against the opponents that finished ahead of it
+        ahead = [o.stats for x in a.races for o in race_of[(x.session, x.rnd)].opponents if o.finish < x.finish]
+        gaps = []
+        if len(ahead) >= 3:
+            for k, lbl in STAT_KEYS:
+                g = st[k] - mean(s_[k] for s_ in ahead)
+                if g <= -50:
+                    gaps.append((g, lbl, k))
+        gaps.sort()
+        for g, lbl, k in gaps[:3]:
+            needs.append(f"{lbl} about {fi(st[k] - g)}+ (now {fi(st[k])}, as the rivals that beat it)")
+        if short / n >= 0.2 and not any(k == "stamina" for _g, _l, k in gaps):
+            needs.append(f"more STA than {fi(st['stamina'])}")
+        if rushed / n >= 0.15 and not any(k == "wiz" for _g, _l, k in gaps):
+            needs.append(f"more WIT than {fi(st['wiz'])}")
+        rows.append(dict(name=a.name, dist=a.dist_label, n=n, loss=own + team, own=own, team=team,
+                         preliminary=n < RELIABLE_RACES, why=why, needs=needs))
+    rows.sort(key=lambda r: -r["loss"])
+    return rows
+
+
+def dist_category_type(meters: Optional[int], dist_type: int) -> int:
+    """Turf distance category as 1-4 (Sprint, Mile, Medium, Long), also for Dirt races."""
+    return {"short": 1, "mile": 2, "middle": 3, "long": 4}[dist_category(meters, dist_type)]
+
+
+def retrain_text(rows: List[dict]) -> List[str]:
+    if not rows:
+        return []
+    top = rows[0]
+    lines = [f"Uma to retrain first: {top['name']} ({top['dist']}, {top['n']} races"
+             f"{', preliminary' if top['preliminary'] else ''}) - about {fi(top['loss'])} final points per session "
+             f"behind your 3 best builds ({fi(top['own'])} from its own placings and skills, {fi(top['team'])} from "
+             f"team bonuses it cost).",
+             "   Why: " + "; ".join(top["why"]) + "."]
+    if top["needs"]:
+        lines.append("   The new one needs: " + "; ".join(top["needs"]) + ".")
+    if len(rows) > 1:
+        lines.append("   Next: " + ", ".join(f"{r['name']} (~{fi(r['loss'])})" for r in rows[1:3]) + ".")
+    return lines
+
+
 def rushed_chance(wiz: int) -> float:
     """Theoretical chance of getting rushed given Wit: ((6.5 / log10(0.1*WIT + 1))^2)%."""
     if wiz <= 0:
@@ -924,6 +1014,9 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R.h2("Summary")
     rel = reliability(umas, sessions)
     R.p(reliability_text(rel))
+    R.p()
+    for line in retrain_text(retrain_ranking(umas, races, mult_std)):
+        R.p(line)
     R.p()
     R.p(f"Average {fi(sum(s.total for s in sessions) / len(sessions))} points per session, "
         f"{fi(sum(s.total for s in sessions) / n_races)} per race. The 5 things worth the most "

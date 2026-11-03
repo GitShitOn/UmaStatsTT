@@ -29,6 +29,8 @@ anywhere, and the page remembers them on your device until you press "Clear".
   too: just upload the contents of `web/`.
 
 The page contains:
+- at the top, the uma to retrain first: how many points it loses per session, why, and what
+  the new build needs;
 - a summary with the key numbers and the 5 actions worth the most;
 - a chart of the score by session;
 - where the points come from;
@@ -87,7 +89,7 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 
 | Section | What it is for |
 |---|---|
-| Summary | The 5 actions worth the most, in estimated final points per session, plus aptitudes below A |
+| Summary | Data reliability, the uma to retrain first, the 5 actions worth the most (estimated final points per session), aptitudes below A |
 | Sessions | Score, wins and losses, opponent rating and multipliers for each session |
 | How the score is built | Percentage bonuses seen and how much 1 base point is worth |
 | Where the points come from | Weight of each category (finishing position, skills, start, ...) in the total |
@@ -99,6 +101,20 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 | Random factors | Effect of mood and frequency of perfect starts |
 | Skills | Activations and points per skill, skills that never fired |
 | What to improve | Full list of priorities, with an estimated gain |
+
+## Which uma to retrain first
+
+A trained uma's stats cannot change, so the way to fix a weak one is a new training. The report
+ranks the current team's umas (with at least 5 races) by the **final points they lose per
+session** compared with your 3 best umas:
+
+- the gap between the average base points of your 3 best umas and this one's, times its multiplier;
+- plus the team bonuses it cost when it was the only uma outside the top 5.
+
+For the uma at the top it lists why (average place, 1st-place and top-5 rate, aptitudes below A,
+running out of stamina, rushed, unique skill rarely firing) and what the new one needs: the
+stats in which it is more than 50 points below the opponents that finished ahead of it, plus
+aptitudes, Stamina or Wit when those are the problem.
 
 ## How many files you need
 

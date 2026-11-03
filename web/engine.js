@@ -178,6 +178,64 @@
       nCurrent: cur.length, reliableRaces: RELIABLE_RACES, minRacesNeeded: MIN_RACES };
   }
 
+  /**
+   * Current umas ranked by final points lost per session against the team's 3 best builds.
+   * Loss = (average base points of the best 3 - this uma's) × its multiplier
+   *      + team bonuses it cost as the only uma outside the top 5.
+   * A trained uma's stats cannot change, so the fix for the top of this list is a new training.
+   */
+  function retrainRanking(umas, races, mult) {
+    const cur = umas.filter((a) => a.current && a.n >= MIN_RACES);
+    if (cur.length < 2) return [];
+    const avgRaw = new Map(cur.map((a) => [a.key, a.avg((r) => r.raw)]));
+    const bench = mean([...avgRaw.values()].sort((x, y) => y - x).slice(0, 3));
+    const teamMult = mean(races.filter((r) => r.teamRaw).map((r) => r.teamFinal / r.teamRaw)) ?? mult;
+    const culprit = {};
+    races.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprit, out[0].key); });
+    const raceOf = new Map(races.map((r) => [`${r.session}|${r.rnd}`, r]));
+    const rows = cur.map((a) => {
+      const n = a.n; const st = a.last.stats; const u = a.last;
+      const own = Math.max(0, bench - avgRaw.get(a.key)) * a.multiplier;
+      const team = get(culprit, a.key) / n * 4000 * teamMult;
+      const first = a.count((r) => r.finish === 1) / n;
+      const top5 = a.count((r) => r.finish <= 5) / n;
+      const why = [`average place ${ff(a.avg((r) => r.finish), 1)}, 1st in ${pct(first)} of its races, top 5 in ${pct(top5)}`];
+      const needs = [];
+      if (get(culprit, a.key)) why.push(`cost the team bonus ${culprit[a.key]} ${plural(culprit[a.key], 'time', 'times')} as the only uma outside the top 5`);
+      const cat = { short: 'Sprint', mile: 'Mile', middle: 'Medium', long: 'Long' }[distCategory(u.distance, u.distType)];
+      [[u.aptDist, 'distance', `A or S ${cat} aptitude`],
+        [u.aptGround, 'track', `A or S ${u.distType === 5 ? 'Dirt' : 'Turf'} aptitude`],
+        [u.aptStyle, 'strategy', `A or S ${STYLE_NAMES[u.style] || ''} aptitude`]].forEach(([apt, what, need]) => {
+        if (apt != null && apt < 7) { why.push(`${what} aptitude ${APT[apt] || '?'}`); needs.push(need); }
+      });
+      const short = a.count(staminaShort);
+      const rushed = a.count(isRushed);
+      if (short / n >= 0.2) why.push(`ran out of stamina in ${short}/${n} races`);
+      if (rushed / n >= 0.15) why.push(`rushed in ${rushed}/${n} races`);
+      if (uniqueId(a.races[a.races.length - 1]) != null) {
+        const k = a.count((r) => get(r.catCount, 'unique') > 0);
+        if (k / n < 0.6) why.push(`unique skill fired in only ${k}/${n} races`);
+      }
+      // stats against the opponents that finished ahead of it
+      const ahead = a.races.flatMap((x) => raceOf.get(`${x.session}|${x.rnd}`).opponents.filter((o) => o.finish < x.finish).map((o) => o.stats));
+      const gaps = [];
+      if (ahead.length >= 3) {
+        STAT_KEYS.forEach(([k, lbl]) => {
+          const g = st[k] - mean(ahead.map((s) => s[k]));
+          if (g <= -50) gaps.push([g, lbl, k]);
+        });
+      }
+      gaps.sort((x, y) => x[0] - y[0]);
+      gaps.slice(0, 3).forEach(([g, lbl, k]) => needs.push(`${lbl} about ${fi(st[k] - g)}+ (now ${fi(st[k])}, as the rivals that beat it)`));
+      if (short / n >= 0.2 && !gaps.some(([, , k]) => k === 'stamina')) needs.push(`more STA than ${fi(st.stamina)}`);
+      if (rushed / n >= 0.15 && !gaps.some(([, , k]) => k === 'wiz')) needs.push(`more WIT than ${fi(st.wiz)}`);
+      return { name: a.name, key: a.key, dist: a.distLabel, mainDist: a.mainDist, n, loss: own + team, own, team,
+        preliminary: n < RELIABLE_RACES, why, needs };
+    });
+    rows.sort((x, y) => y.loss - x.loss);
+    return rows;
+  }
+
   function rushedChance(wiz) {
     if (wiz <= 0) return 1;
     return Math.min(1, (6.5 / Math.log10(0.1 * wiz + 1)) ** 2 / 100);
@@ -906,6 +964,7 @@
       nSessions, nRaces, nUmas: umas.length, nCurrent: umas.filter((a) => a.current).length,
       latest: sessions.length ? sessions[sessions.length - 1].label : null, changes, mult, bonuses, oppFormula, sessions: sessionRows,
       reliability: reliability(umas, sessions),
+      retrain: retrainRanking(umas, races, mult),
       totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
       raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
       wins: races.filter((r) => r.win).length,

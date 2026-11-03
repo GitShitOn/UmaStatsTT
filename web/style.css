@@ -308,6 +308,18 @@ a { color: inherit; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .note { color: var(--ink-2); font-size: var(--step--1); max-width: 80ch; }
 
+/* retrain first */
+.retrain { display: grid; gap: 12px; border-color: var(--accent); }
+.retrain-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.retrain-head h3 { font-family: var(--font-display); font-weight: 800; font-size: var(--step-3); line-height: 1; }
+.retrain-head h3 a { text-decoration: none; }
+.retrain-head h3 a:hover { text-decoration: underline; }
+.retrain-loss strong { font-size: var(--step-1); font-variant-numeric: tabular-nums; }
+.retrain h4 { margin: 0 0 4px; font-size: var(--step--1); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 4px; }
+ul.plain.inline { display: flex; flex-wrap: wrap; gap: 4px 18px; padding-left: 0; list-style: none; }
+.retrain-next { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+
 /* data reliability */
 .reliability { display: grid; gap: 10px; }
 .reliability > h3, .rel-head h3 { margin: 0; }
