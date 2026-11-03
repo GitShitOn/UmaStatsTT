@@ -42,14 +42,14 @@
   const CATEGORY_LABELS = {
     place: 'Finishing position',
     margin: 'Winning margin',
-    upset: 'Upset vs popularity',
+    upset: 'Outsider in the top 3',
     unique: 'Unique skill',
     gold: 'Gold skills',
     white: 'White and inherited skills',
     start: 'Perfect start',
     lead16: 'Leads own strategy at 1/6',
     lead23: 'Leads own strategy at 2/3',
-    time: 'Time bonus',
+    time: 'Time bonus (under reference time)',
     rushed: 'Rushed (penalty)',
     team: 'Team bonus',
     other: 'Other',
@@ -59,16 +59,16 @@
   const SKILL_CATS = ['unique', 'gold', 'white'];
 
   const LEGEND = [
-    ['Finishing position', '1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th 3,000, 10th-12th 2,000.'],
-    ['Winning margin', '1st place only: bigger margin, more points (1,000 to 2,200 seen).'],
-    ['Upset (inferred)', '3,000-4,000 for finishing 1st or 2nd as an outsider.'],
+    ['Finishing position', '1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th-9th 3,000, 10th-12th 2,000.'],
+    ['Winning margin', '1st place only: nose 5,000, head 3,000, neck 2,000; then 1,000 for ½ length, +100 per step up to 2,600 for 10 lengths, and 3,000 for more than 10. Photo-finish wins are worth the most.'],
+    ['Outsider', '+4,000 if an uma with popularity 8 or lower finishes in the top 3.'],
     ['Skills', 'White or inherited unique 500, gold 1,200, unique 2,300-2,500 (grows with level). Passive skills count too.'],
     ['Perfect start', '+1,000 when the start delay is under 0.02 s.'],
     ['Leads own strategy', '+1,000 if at 1/6 of the race you are ahead of every uma with your same strategy, opponents included; another +1,000 at 2/3.'],
-    ['Time bonus', '+100 per 0.1 s under a course reference time (only seen on Sprint and Mile).'],
+    ['Time bonus', '+100 per 0.1 s under a course reference time (up to 2,000 seen), mostly on Sprint and Mile.'],
     ['Rushed', '−500 when it starts and −100 for every second it lasts.'],
     ['Team bonus', '+4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.'],
-    ['Percentage bonuses', 'On every item: opponent (about +155%, grows with their rating), support cards (about +10%), first uma of the distance (+10%), win streak (+2%, +3%, ...).'],
+    ['Percentage bonuses', 'On every item: opponent (+1.3 points per 1,000 opponent rating, −0.8 per 1,000 of your own), support cards (about +10%), first uma of the distance (+10%), win streak (+2% on the 2nd win in a row up to +5% on the 5th).'],
   ];
 
   function ordinal(n) {
@@ -76,9 +76,19 @@
     return `${n}${suffix}`;
   }
 
+  // Winning margin categories (raw_score_id 1-21). 1 length = 1/6 s of finish time.
+  const MARGIN_LABELS = { 1: 'more than 10 lengths', 2: '10 lengths', 3: '9 lengths', 4: '8 lengths', 5: '7 lengths',
+    6: '6 lengths', 7: '5 lengths', 8: '4 lengths', 9: '3½ lengths', 10: '3 lengths', 11: '2½ lengths', 12: '2 lengths',
+    13: '1¾ lengths', 14: '1½ lengths', 15: '1¼ lengths', 16: '1 length', 17: '¾ length', 18: '½ length',
+    19: 'nose', 20: 'head', 21: 'neck' };
+
+  // Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions, error < 0.06 points).
+  const OPP_BONUS_FIT = [-0.04099, 1.29733e-5, -0.78386e-5];
+  const oppBonusModel = (opp, self) => OPP_BONUS_FIT[0] + OPP_BONUS_FIT[1] * opp + OPP_BONUS_FIT[2] * self;
+
   function scoreCategory(rid) {
-    if (rid >= 1 && rid <= 19) return ['margin', `Winning margin (#${rid})`];
-    if (rid >= 20 && rid <= 22) return ['upset', `Upset vs popularity (#${rid})`];
+    if (rid >= 1 && rid <= 21) return ['margin', `Winning margin: ${MARGIN_LABELS[rid]}`];
+    if (rid === 22) return ['upset', 'Outsider (popularity 8 or lower) in the top 3'];
     if (rid === 23) return ['rushed', 'Rushed: start'];
     if (rid === 24) return ['rushed', 'Rushed: each second'];
     if (rid === 25) return ['start', 'Perfect start'];
@@ -88,7 +98,7 @@
     if (rid === 58) return ['lead16', 'Leads own strategy at 1/6'];
     if (rid === 59) return ['lead23', 'Leads own strategy at 2/3'];
     if (rid >= 60 && rid <= 71) return ['place', `Finished ${ordinal(rid - 59)}`];
-    if (rid >= 80 && rid <= 92) return ['time', 'Time bonus'];
+    if (rid >= 72 && rid <= 92) return ['time', `Time bonus: ${((92 - rid) / 10).toFixed(1)} s under the reference time`];
     if (rid === 94) return ['team', 'Team: all in the top 3'];
     if (rid === 95) return ['team', 'Team: all in the top 5'];
     if (rid >= 93 && rid <= 99) return ['team', `Team bonus #${rid}`];
@@ -656,6 +666,10 @@
       }
     }
 
+    const basePerSession = (sum(allUr.map((u) => u.raw)) + sum(races.map((r) => r.teamRaw))) / nSessions;
+    const perK = OPP_BONUS_FIT[1] * 1000 * basePerSession;
+    notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still finish ahead of: stronger rivals also push your umas down the order.` });
+
     const l16 = allUr.filter((u) => get(u.catCount, 'lead16')).length / allUr.length;
     const l23 = allUr.filter((u) => get(u.catCount, 'lead23')).length / allUr.length;
     const neverLead = cur.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
@@ -703,6 +717,10 @@
     sessions.forEach((s) => Object.entries(s.bonusRates).forEach(([k, v]) => { (allRates[k] ||= []).push(...v); }));
     const mult = 1 + (mean(allRates.opponent || []) || 0) + (mean(allRates.support || []) || 0);
     const supportCfg = [...new Set(sessions.map((s) => s.supportBonus).filter(Boolean))].sort();
+    const oppErrs = sessions.filter((s) => s.oppEval && s.selfEval && (s.bonusRates.opponent || []).length)
+      .map((s) => Math.abs(mean(s.bonusRates.opponent) - oppBonusModel(s.oppEval, s.selfEval)));
+    const oppFormula = { a: OPP_BONUS_FIT[0], perK: OPP_BONUS_FIT[1] * 1000, selfPerK: OPP_BONUS_FIT[2] * 1000,
+      maxErr: oppErrs.length ? Math.max(...oppErrs) : null };
     const bonuses = ['opponent', 'support', 'ace', 'streak'].filter((k) => allRates[k] && allRates[k].length).map((k) => {
       const v = allRates[k];
       return { key: k, label: BONUS_LABELS[k], min: Math.min(...v), max: Math.max(...v), mean: mean(v),
@@ -833,7 +851,7 @@
 
     return {
       nSessions, nRaces, nUmas: umas.length, nCurrent: umas.filter((a) => a.current).length,
-      latest: sessions.length ? sessions[sessions.length - 1].label : null, changes, mult, bonuses, sessions: sessionRows,
+      latest: sessions.length ? sessions[sessions.length - 1].label : null, changes, mult, bonuses, oppFormula, sessions: sessionRows,
       totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
       raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
       wins: races.filter((r) => r.win).length,

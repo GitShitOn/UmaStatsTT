@@ -104,30 +104,34 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 
 Every event is worth **base points**. Each item is then multiplied by `1 + bonuses`, and the
 team bonus is added at the end. The script checks that the sum matches `team_total_score`.
+The rules below were derived by matching every score event against the race replays, and
+checked on 77 sessions (385 races, 1,155 runs).
 
 | Event | Base points |
 |---|---|
-| Finishing position | 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th 3,000, 10th-12th 2,000 |
-| Winning margin (1st place only) | bigger margin = more points (1,000-2,200 seen) |
+| Finishing position | 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th-9th 3,000, 10th-12th 2,000 |
+| Winning margin (1st place only) | nose 5,000, head 3,000, neck 2,000; ½ length 1,000, then +100 per step up to 2,600 for 10 lengths; more than 10 lengths 3,000 (1 length = 1/6 s) |
 | White skill / inherited unique | 500 per activation (passive skills count too) |
 | Gold skill | 1,200 per activation |
 | Unique skill | 2,300-2,500 (grows with level) |
 | Perfect start | 1,000 when the start delay is under 0.02 s |
 | Leads own strategy at 1/6 of the race | 1,000 if you are ahead of every uma with your same strategy |
 | Leads own strategy at 2/3 of the race | 1,000, same rule at the start of the final phase |
-| Time bonus | +100 per 0.1 s under a course reference time |
+| Time bonus | +100 per 0.1 s under a course reference time (up to 2,000 seen), mostly on Sprint and Mile |
 | Rushed | -500 when it starts, -100 for every second |
-| Upset (inferred) | 3,000-4,000 for a 1st/2nd place as an outsider |
+| Outsider | 4,000 when an uma with popularity 8 or lower finishes in the top 3 |
 | Team | +4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3 |
 
 | Percentage bonus | Value seen |
 |---|---|
-| Opponent | about +155%, grows with the opposing team's rating |
+| Opponent | −4.10% + 1.30% per 1,000 opponent rating − 0.78% per 1,000 of your own rating (fits all 77 sessions within 0.06%) |
 | Support cards | `support_card_bonus` / 100 (e.g. 1018 = +10.18%) |
 | First uma of the distance (slot 1) | +10% |
-| Win streak | +2% on the 2nd win in a row, +3% on the 3rd, ... |
+| Win streak | +2% on the 2nd win in a row, +3% on the 3rd, up to +5% on the 5th |
 
-In practice 1 base point is worth about 2.65 final points. What moves your score is base points.
+In practice 1 base point is worth about 2.6-2.8 final points. What moves your score is base points.
+A stronger opponent raises the multiplier: every +1,000 opponent rating is worth about 1.3% of
+your base points per session.
 
 ## If you change your team between sessions
 
@@ -147,7 +151,8 @@ never get mixed, even when they are the same character.
 ## Limits
 
 - The files contain your team's scores, not your opponents'.
-- Rules marked "inferred" are based on few cases.
+- The unique-skill score depends on the skill level (2,300 / 2,400 / 2,500 for level 3 / 4 / 5);
+  the game uses two separate score ids for level 4, and what tells them apart is still unknown.
 - The Wit-based chances use well-known community formulas and are indicative:
   skill `max(100 - 9000/WIT, 20)%`, rushed `(6.5 / log10(WIT/10 + 1))^2 %`.
 - The estimated gains are meant to rank priorities, not to predict exact results.

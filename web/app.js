@@ -20,17 +20,51 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // ------------------------------------------------------------ local storage
+  // IndexedDB holds the files (dozens of sessions are well over localStorage's ~5 MB);
+  // localStorage is only read to pick up files saved by older versions of the page.
 
-  function saveFiles() {
+  const DB_NAME = 'umastats';
+  const DB_STORE = 'files';
+
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB not available')); return; }
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbRun(mode, fn) {
+    const db = await idbOpen();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, mode);
+        const req = fn(tx.objectStore(DB_STORE));
+        tx.oncomplete = () => resolve(req ? req.result : undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  async function saveFiles() {
     if (state.source !== 'user' && state.source !== 'saved') return true;
     try {
-      localStorage.setItem(STORE_KEY, JSON.stringify(state.files));
+      await idbRun('readwrite', (st) => st.put(state.files, STORE_KEY));
+      try { localStorage.removeItem(STORE_KEY); } catch (e) { /* storage not available */ }
       return true;
     } catch (e) {
       return false;
     }
   }
-  function loadSaved() {
+  async function loadSaved() {
+    try {
+      const v = await idbRun('readonly', (st) => st.get(STORE_KEY));
+      if (Array.isArray(v) && v.length) return v;
+    } catch (e) { /* fall back to localStorage */ }
     try {
       const s = localStorage.getItem(STORE_KEY);
       const v = s ? JSON.parse(s) : null;
@@ -39,7 +73,8 @@
       return null;
     }
   }
-  function clearSaved() {
+  async function clearSaved() {
+    try { await idbRun('readwrite', (st) => st.delete(STORE_KEY)); } catch (e) { /* storage not available */ }
     try { localStorage.removeItem(STORE_KEY); } catch (e) { /* storage not available */ }
   }
 
@@ -74,7 +109,7 @@
       state.source = 'user';
     }
     await rebuild();
-    if (incoming.length && !saveFiles()) {
+    if (incoming.length && !(await saveFiles())) {
       state.messages.push('The files could not be remembered on this device (storage full or blocked). You will need to load them again next time.');
       renderStatus();
     }
@@ -143,7 +178,12 @@
     const cls = p === 1 ? 'p1' : p <= 3 ? 'p2' : p <= 5 ? 'p4' : 'p6';
     return `<span class="pos ${cls}" title="${ordinal(p)}">${p}</span>`;
   };
-  const posRow = (arr) => `<span class="posrow" aria-label="Finishes: ${arr.join(', ')}">${arr.map(posBadge).join('')}</span>`;
+  // the last `max` finishes; older ones are summarized as "+N" (the full list stays in the aria-label)
+  const posRow = (arr, max = 12) => {
+    const shown = arr.length > max ? arr.slice(-max) : arr;
+    const more = arr.length - shown.length;
+    return `<span class="posrow" aria-label="Finishes: ${arr.join(', ')}">${more ? `<span class="pos-more" title="${more} earlier races">+${more}</span>` : ''}${shown.map(posBadge).join('')}</span>`;
+  };
   const flagRate = (k, n, warnAt, badAt) => {
     if (!k) return `${k}/${n}`;
     const r = k / n;
@@ -194,10 +234,13 @@
       grid.push(`<div class="gridline${v === 0 ? ' base' : ''}" style="bottom:${((v / max) * 100).toFixed(2)}%"><span>${compact(v)}</span></div>`);
     }
     const best = ss.reduce((a, b) => (b.total > a.total ? b : a));
-    const every = Math.ceil(ss.length / 8);
+    // with many sessions: date only, and at most 5 labels so they never overlap on a phone
+    const many = ss.length > 8;
+    const every = many ? Math.ceil(ss.length / 5) : 1;
+    const dateOnly = (l) => shortLabel(l).replace(/, \d{2}:\d{2}$/, '');
     const cols = ss.map((s) => `<div class="col" tabindex="0" style="--h:${((s.total / max) * 100).toFixed(2)}%" ${tipAttr(fi(s.total), `${s.label} · ${s.wins} won of ${s.n}`, `${fi(s.perRace)} per race · opponent bonus ${pct(s.oppRate, 1)}`)}>
         ${ss.length <= 8 || s === best ? `<span class="cap${s === best ? ' keep' : ''}">${fi(s.total)}</span>` : ''}<i class="bar"></i></div>`).join('');
-    const labels = ss.map((s, i) => `<div>${i % every === 0 ? `<span>${esc(shortLabel(s.label))}</span>` : '<span>&nbsp;</span>'}
+    const labels = ss.map((s, i) => `<div>${i % every === 0 ? `<span>${esc(many ? dateOnly(s.label) : shortLabel(s.label))}</span>` : '<span>&nbsp;</span>'}
         ${ss.length <= 12 ? `<span class="wl" aria-label="${s.wins} won, ${s.n - s.wins} lost">${s.results.map((w) => `<b class="${w ? 'w' : ''}"></b>`).join('')}</span>` : ''}</div>`).join('');
     return `<div class="colchart" role="img" aria-label="Total score by session">
       <div class="colchart-plot">${grid.join('')}<div class="cols">${cols}</div></div>
@@ -223,7 +266,8 @@
     return `<section class="section" id="scoring" aria-labelledby="h-scoring">
       ${sectionHead('scoring', 'Scoring', 'Where the points come from', 'Every race event is worth <strong>base points</strong>; then every percentage bonus multiplies them. To go up, raise your base points.')}
       <div class="panel"><h3>Percentage bonuses seen</h3><div class="kv">${bonus}</div>
-        <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} final points.</p></div>
+        <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} final points.</p>
+        <p class="note" style="margin-top:8px">Opponent bonus = ${pct(A.oppFormula.a, 2)} + ${pct(A.oppFormula.perK, 2)} per 1,000 opponent rating − ${pct(-A.oppFormula.selfPerK, 2)} per 1,000 of your own rating${A.oppFormula.maxErr != null ? `; on your sessions it is off by at most ${pct(A.oppFormula.maxErr, 2)}` : ''}. A stronger opponent raises the multiplier.</p></div>
       <div class="table-wrap"><table>
         <thead><tr><th class="first">Item</th><th class="n">Base points per event</th><th class="n">Present</th><th>Final points per race</th><th class="n">Share</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -449,7 +493,7 @@
 
   function secLegend() {
     return `<section class="section" id="legend" aria-labelledby="h-legend">
-      ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays. Those marked “inferred” are based on few cases.')}
+      ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 385 races.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
       <p class="note">Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
     </section>`;
@@ -604,7 +648,7 @@
   // ------------------------------------------------------------ start-up
 
   (async function start() {
-    const saved = loadSaved();
+    const saved = await loadSaved();
     if (saved && saved.length) {
       state.files = saved;
       state.source = 'saved';

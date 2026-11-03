@@ -70,19 +70,18 @@ CHARA_NAMES = {
 }
 
 # Base-point categories (raw_score_id). Derived from the data: every score event in the
-# replay was matched against the race state (positions, HP, skills, times).
-# "(inferred)" = consistent with the data but based on few cases.
+# replay was matched against the race state (positions, HP, skills, times) over 385 races.
 CATEGORY_LABELS = {
     "place": "Finishing position",
     "margin": "Winning margin",
-    "upset": "Upset vs popularity (inferred)",
+    "upset": "Outsider in the top 3",
     "unique": "Unique skill",
     "gold": "Gold skills",
     "white": "White / inherited unique skills",
     "start": "Perfect start (<0.02 s)",
     "lead16": "Leads own strategy at 1/6",
     "lead23": "Leads own strategy at 2/3",
-    "time": "Time bonus (under reference)",
+    "time": "Time bonus (under reference time)",
     "rushed": "Rushed (penalty)",
     "team": "Team bonus",
     "other": "Other",
@@ -97,12 +96,27 @@ def ordinal(n: int) -> str:
     return f"{n}{suffix}"
 
 
+# Winning margin categories (raw_score_id 1-21). 1 length = 1/6 s of finish time.
+MARGIN_LABELS = {1: "more than 10 lengths", 2: "10 lengths", 3: "9 lengths", 4: "8 lengths", 5: "7 lengths",
+                 6: "6 lengths", 7: "5 lengths", 8: "4 lengths", 9: "3 1/2 lengths", 10: "3 lengths",
+                 11: "2 1/2 lengths", 12: "2 lengths", 13: "1 3/4 lengths", 14: "1 1/2 lengths", 15: "1 1/4 lengths",
+                 16: "1 length", 17: "3/4 length", 18: "1/2 length", 19: "nose", 20: "head", 21: "neck"}
+
+# Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions, error < 0.06 points).
+OPP_BONUS_FIT = (-0.04099, 1.29733e-5, -0.78386e-5)
+
+
+def opp_bonus_model(opp_eval: int, self_eval: int) -> float:
+    a, b, c = OPP_BONUS_FIT
+    return a + b * opp_eval + c * self_eval
+
+
 def score_category(rid: int) -> Tuple[str, str]:
     """raw_score_id -> (category, description)."""
-    if 1 <= rid <= 19:
-        return "margin", f"Winning margin (#{rid}, lower id = bigger margin)"
-    if 20 <= rid <= 22:
-        return "upset", f"Upset: finished far above popularity (#{rid})"
+    if 1 <= rid <= 21:
+        return "margin", f"Winning margin: {MARGIN_LABELS[rid]}"
+    if rid == 22:
+        return "upset", "Outsider (popularity 8 or lower) in the top 3"
     if rid == 23:
         return "rushed", "Rushed: start (-500)"
     if rid == 24:
@@ -121,8 +135,8 @@ def score_category(rid: int) -> Tuple[str, str]:
         return "lead23", "Leads the umas of its strategy at the start of the final phase (2/3)"
     if 60 <= rid <= 71:
         return "place", f"Finished {ordinal(rid - 59)}"
-    if 80 <= rid <= 92:
-        return "time", "Time bonus: +100 per 0.1 s under the reference time"
+    if 72 <= rid <= 92:
+        return "time", f"Time bonus: {(92 - rid) / 10:.1f} s under the reference time"
     if rid == 94:
         return "team", "Team: all 3 in the top 3"
     if rid == 95:
@@ -146,19 +160,21 @@ BONUS_LABELS = {
 }
 
 LEGEND = [
-    "Finishing position: 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th 3,000, "
+    "Finishing position: 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000, 8th-9th 3,000, "
     "10th-12th 2,000.",
-    "Winning margin (1st place only): bigger margin = more points (1,000-2,200 observed).",
-    "Upset (inferred): 3,000-4,000 for finishing 1st/2nd as an outsider (low popularity).",
+    "Winning margin (1st place only): nose 5,000, head 3,000, neck 2,000; then 1,000 for 1/2 length, +100 per "
+    "step up to 2,600 for 10 lengths, and 3,000 for more than 10. Photo-finish wins are worth the most.",
+    "Outsider: +4,000 if an uma with popularity 8 or lower finishes in the top 3.",
     "Skills: white or inherited unique 500, gold 1,200, unique 2,300-2,500 (grows with level). Passive skills count.",
     "Perfect start: +1,000 when the start delay is under 0.02 s.",
     "Leads own strategy: +1,000 if at 1/6 of the race (end of the opening phase) you are ahead of every uma "
     "with your same strategy; another +1,000 at 2/3 (start of the final phase).",
-    "Time bonus: +100 per 0.1 s under a course reference time (only seen on Sprint/Mile).",
+    "Time bonus: +100 per 0.1 s under a course reference time (up to 2,000 seen), mostly on Sprint and Mile.",
     "Rushed: -500 when it starts and -100 for every second it lasts.",
     "Team: +4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.",
-    "Percentage bonuses on every item: opponent (~+155%, grows with their rating), support cards (~+10%), "
-    "first uma of the distance / slot 1 (+10%), win streak (+2%, +3%, ...).",
+    "Percentage bonuses on every item: opponent (+1.3 points per 1,000 opponent rating, -0.8 per 1,000 of your "
+    "own), support cards (~+10%), first uma of the distance / slot 1 (+10%), win streak (+2% on the 2nd win in a "
+    "row up to +5% on the 5th).",
 ]
 
 
@@ -893,11 +909,14 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R.p()
     R.p(f"=> 1 base point is worth about {ff(mult_std, 2)} final points ({ff(mult_std + 0.10, 2)} for the uma in slot 1).")
     R.p("   Every bonus is a percentage: to go up, raise your BASE POINTS.")
-    if allrates.get("opponent") and len(sessions) > 1:
-        pairs = sorted((s.opp_eval or 0, safe_mean(s.bonus_rates.get("opponent", []), 0)) for s in sessions)
-        R.p("   Opponent bonus by opponent rating: " +
-            ", ".join(f"{fi(e)} -> {pct(r, 1)}" for e, r in pairs) +
-            "  (stronger opponents = higher multiplier).")
+    if allrates.get("opponent"):
+        a, b, c = OPP_BONUS_FIT
+        R.p(f"   Opponent bonus = {pct(a, 2)} + {ff(b * 1e5, 2)}% per 1,000 opponent rating "
+            f"- {ff(-c * 1e5, 2)}% per 1,000 of your own rating.")
+        errs = [abs(safe_mean(s.bonus_rates.get("opponent", []), 0) - opp_bonus_model(s.opp_eval, s.self_eval))
+                for s in sessions if s.opp_eval and s.self_eval and s.bonus_rates.get("opponent")]
+        if errs:
+            R.p(f"   On your sessions the formula is off by at most {ff(100 * max(errs), 2)} points.")
     R.p()
 
     # value per event, by category
@@ -979,13 +998,14 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     for a in umas:
         rows.append([a.label, a.dist_label, STYLE_NAMES.get(a.last.style, "?"),
                      ("former" if not a.current else "ACE" if a.last.slot == 1 else str(a.last.slot)), a.n,
-                     ff(a.avg("finish"), 1), " ".join(str(r.finish) for r in a.races),
+                     ff(a.avg("finish"), 1),
+                     ("+" + str(a.n - 12) + " " if a.n > 12 else "") + " ".join(str(r.finish) for r in a.races[-12:]),
                      fi(a.avg("raw")), fi(a.avg("final")),
                      fi(safe_mean([r.cat_raw["place"] for r in a.races])),
                      fi(safe_mean([sum(r.cat_raw[k] for k in SKILL_CATS) for r in a.races])),
                      fi(safe_mean([r.cat_raw["start"] + r.cat_raw["lead16"] + r.cat_raw["lead23"] for r in a.races])),
                      fi(safe_mean([r.cat_raw["rushed"] for r in a.races]))])
-    R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Finishes", "Base/r", "Final/r",
+    R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Last finishes", "Base/r", "Final/r",
              "Placing", "Skills", "Pos/start", "Rushed"], rows, "lllrrrlrrrrrr")
     R.p("Placing/Skills/Pos-start/Rushed columns = average base points per race from: finishing position,")
     R.p("skills, perfect start + leading own strategy (1/6 and 2/3), rushed penalty.")
@@ -1166,8 +1186,7 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     for line in LEGEND:
         R.bullet(line)
     R.p()
-    R.p("Rules derived by matching every score event against the race replay;")
-    R.p("those marked '(inferred)' are based on few cases.")
+    R.p("Rules derived by matching every score event against the race replays (385 races).")
     return R.render()
 
 
@@ -1332,6 +1351,13 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
             est.append((gain, f"Perfect start in {pct(rate)} of runs (+1,000 base each). It is random (~20% "
                               f"without help), but skills that shorten the start delay make it much more "
                               f"frequent: reaching 50% would be worth ~{fi(gain)} per session.{detail}"))
+
+    # Opponent choice: the opponent bonus grows with the opponent's rating
+    base_per_session = sum(u.raw for u in all_ur) / n_sessions + sum(r.team_raw for r in races) / n_sessions
+    per_k = OPP_BONUS_FIT[1] * 1000 * base_per_session
+    notes.append((2, f"Opponent choice: every +1,000 opponent rating adds {ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the "
+                     f"opponent bonus, about {fi(per_k)} final points per session at your scores. Pick the strongest "
+                     f"opponent you can still finish ahead of: stronger rivals also push your umas down the order."))
 
     # Leads own strategy
     l16 = sum(1 for u in all_ur if u.cat_count["lead16"]) / len(all_ur)
