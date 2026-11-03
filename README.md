@@ -19,8 +19,12 @@ nessuna parte. La pagina li ricorda sul dispositivo finché non premi "Svuota".
 - **Dal disco:** apri `web/index.html` con un doppio clic.
 - **File unico da condividere o usare offline:** `python3 web/build.py` crea
   `dist/UmaStatsTT.html`, con stile, codice e nomi delle skill inclusi.
-- **Online:** la cartella `web/` si può pubblicare così com'è su qualsiasi hosting statico,
-  ad esempio GitHub Pages.
+- **Online con GitHub Pages:** il workflow `.github/workflows/pages.yml` pubblica `web/` a
+  ogni push sul branch predefinito che modifica la webapp. Va attivato una volta sola:
+  Settings → Pages → Build and deployment → Source: **GitHub Actions**. Poi, dalla scheda
+  Actions, avvia "Pubblica la webapp su GitHub Pages" con *Run workflow* (o fai un push).
+  L'indirizzo sarà `https://<utente>.github.io/UmaStatsTT/`. Va bene anche qualsiasi altro
+  hosting statico: basta caricare il contenuto di `web/`.
 
 Contenuto della pagina:
 - sintesi con i numeri chiave e le 5 azioni che valgono di più;
