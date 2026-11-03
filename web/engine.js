@@ -236,6 +236,46 @@
     return rows;
   }
 
+  /**
+   * Slot 1 (+10% bonus) check for each distance of the current team. Compares the current first uma
+   * with each teammate of the same distance only on the sessions where both ran it (same opponents,
+   * same period). Warns when a teammate scores more by at least one standard error; "clear" from two.
+   */
+  function aceCheck(umas) {
+    const cur = umas.filter((a) => a.current);
+    const warnings = []; const unchecked = [];
+    [...new Set(cur.map((a) => a.last.distType))].sort((x, y) => x - y).forEach((dt) => {
+      const group = cur.filter((a) => a.last.distType === dt);
+      const ace = group.find((a) => a.last.slot === 1);
+      if (!ace) return;
+      const mine = new Map(ace.races.filter((r) => r.distType === dt).map((r) => [r.session, r.raw]));
+      let best = null; let checked = false;
+      group.forEach((b) => {
+        if (b === ace) return;
+        const theirs = new Map(b.races.filter((r) => r.distType === dt).map((r) => [r.session, r.raw]));
+        const common = [...mine.keys()].filter((k) => theirs.has(k));
+        if (common.length < MIN_RACES) return;
+        checked = true;
+        const diffs = common.map((k) => theirs.get(k) - mine.get(k));
+        const m = mean(diffs);
+        const sd = Math.sqrt(diffs.reduce((t, x) => t + (x - m) ** 2, 0) / (diffs.length - 1));
+        const se = sd / Math.sqrt(diffs.length);
+        const z = se > 0 ? m / se : (m > 0 ? Infinity : 0);
+        if (m > 0 && z >= 1 && (!best || m > best.diff)) {
+          best = { dist: DIST_NAMES[dt] || String(dt), ace: ace.name, cand: b.name, candKey: b.key, diff: m, z, n: common.length,
+            aceAvg: mean(common.map((k) => mine.get(k))), candAvg: mean(common.map((k) => theirs.get(k))), gain: 0.1 * m };
+        }
+      });
+      if (best) warnings.push(best);
+      else if (!checked) unchecked.push(DIST_NAMES[dt] || String(dt));
+    });
+    return { warnings, unchecked };
+  }
+
+  function aceWarningText(w) {
+    return `Slot 1 (+10% bonus): in ${w.dist} put ${w.cand} in slot 1 instead of ${w.ace}. In the ${w.n} sessions they ran together it averaged ${fi(w.candAvg)} base points vs ${fi(w.aceAvg)}: about +${fi(w.gain)} final points per session, small but free. ${w.z >= 2 ? 'Clear difference.' : 'Probable: a few more sessions will confirm it.'}`;
+  }
+
   function rushedChance(wiz) {
     if (wiz <= 0) return 1;
     return Math.min(1, (6.5 / Math.log10(0.1 * wiz + 1)) ** 2 / 100);
@@ -714,17 +754,8 @@
       est.push({ gain, kind: 'wit', text: `Low Wit means fewer skills firing (Wit check, theoretical chance): ${witItems.slice(0, 5).map((x) => `${x.a.name} WIT ${x.a.last.stats.wiz} ${pct(x.p)}`).join(', ')}. Raising it to ${fi(target)} (${pct(skillChance(target))}) is worth about ${fi(gain)} per session.` });
     }
 
-    const byDist = {};
-    cur.forEach((a) => { (byDist[a.last.distType] ||= []).push(a); });
-    Object.keys(byDist).map(Number).sort((x, y) => x - y).forEach((dt) => {
-      const groupDt = byDist[dt];
-      const ace = groupDt.find((a) => a.last.slot === 1);
-      const best = groupDt.reduce((x, y) => (y.avg((r) => r.raw) > x.avg((r) => r.raw) ? y : x));
-      if (ace && best !== ace && best.n >= 2 && ace.n >= 2) {
-        const diff = best.avg((r) => r.raw) - ace.avg((r) => r.raw);
-        est.push({ gain: 0.1 * diff, kind: 'ace', text: `${DIST_NAMES[dt]}: put ${best.name} first (slot 1) instead of ${ace.name} (${fi(best.avg((r) => r.raw))} vs ${fi(ace.avg((r) => r.raw))} average base). The +10% pays more on the uma that scores more.` });
-      }
-    });
+    // Slot 1 (+10%): warn when a teammate of the same distance would earn more with it
+    aceCheck(umas).warnings.forEach((w) => notes.push({ prio: 1, kind: 'ace', text: aceWarningText(w) }));
 
     if (sessions && sessions.length) {
       const lostM = sessions.filter((s) => !s.victory);
@@ -965,6 +996,7 @@
       latest: sessions.length ? sessions[sessions.length - 1].label : null, changes, mult, bonuses, oppFormula, sessions: sessionRows,
       reliability: reliability(umas, sessions),
       retrain: retrainRanking(umas, races, mult),
+      aceCheck: aceCheck(umas),
       totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
       raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
       wins: races.filter((r) => r.win).length,

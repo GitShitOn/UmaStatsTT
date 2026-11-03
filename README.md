@@ -89,7 +89,7 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 
 | Section | What it is for |
 |---|---|
-| Summary | Data reliability, the uma to retrain first, the 5 actions worth the most (estimated final points per session), aptitudes below A |
+| Summary | Data reliability, the uma to retrain first, the 5 actions worth the most (estimated final points per session), warnings (aptitudes below A, slot 1 on the wrong uma) |
 | Sessions | Score, wins and losses, opponent rating and multipliers for each session |
 | How the score is built | Percentage bonuses seen and how much 1 base point is worth |
 | Where the points come from | Weight of each category (finishing position, skills, start, ...) in the total |
@@ -115,6 +115,20 @@ For the uma at the top it lists why (average place, 1st-place and top-5 rate, ap
 running out of stamina, rushed, unique skill rarely firing) and what the new one needs: the
 stats in which it is more than 50 points below the opponents that finished ahead of it, plus
 aptitudes, Stamina or Wit when those are the problem.
+
+## Slot 1 (first uma) check
+
+The uma in slot 1 of each distance gets +10% on all its points. For every distance the report
+compares the current slot-1 uma with each teammate of the same distance, **only on the sessions
+in which both ran that distance** (same opponents, same period), and warns when a teammate
+scores more:
+
+- *probable* when the difference is at least one standard error, *clear* from two;
+- it needs at least 5 sessions together, otherwise it says the distance cannot be checked yet;
+- when nothing needs to change it says so.
+
+The gain is small (10% of the difference in base points, usually 50-300 final points per
+session) but free.
 
 ## How many files you need
 

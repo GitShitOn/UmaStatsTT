@@ -32,7 +32,7 @@ import struct
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from statistics import mean
+from statistics import mean, stdev
 from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -858,6 +858,52 @@ def retrain_ranking(umas: List[UmaAgg], races: List[Race], mult: float) -> List[
     return rows
 
 
+def ace_check(umas: List[UmaAgg]) -> Tuple[List[dict], List[str]]:
+    """Slot 1 (+10% bonus) check for each distance of the current team.
+
+    Compares the current first uma with each teammate of the same distance only on the sessions
+    where both ran it (same opponents, same period). Warns when a teammate scores more by at least
+    one standard error; "clear" from two. Returns (warnings, distances that cannot be checked yet).
+    """
+    cur = [a for a in umas if a.current]
+    warnings, unchecked = [], []
+    for dt in sorted({a.last.dist_type for a in cur}):
+        group = [a for a in cur if a.last.dist_type == dt]
+        ace = next((a for a in group if a.last.slot == 1), None)
+        if ace is None:
+            continue
+        mine = {r.session: r.raw for r in ace.races if r.dist_type == dt}
+        best, checked = None, False
+        for b in group:
+            if b is ace:
+                continue
+            theirs = {r.session: r.raw for r in b.races if r.dist_type == dt}
+            common = [s_ for s_ in mine if s_ in theirs]
+            if len(common) < MIN_RACES:
+                continue
+            checked = True
+            diffs = [theirs[s_] - mine[s_] for s_ in common]
+            m = mean(diffs)
+            se = stdev(diffs) / math.sqrt(len(diffs))
+            z = m / se if se > 0 else (math.inf if m > 0 else 0.0)
+            if m > 0 and z >= 1 and (best is None or m > best["diff"]):
+                best = dict(dist=DIST_NAMES.get(dt, str(dt)), ace=ace.name, cand=b.name, diff=m, z=z,
+                            n=len(common), ace_avg=mean(mine[s_] for s_ in common),
+                            cand_avg=mean(theirs[s_] for s_ in common), gain=0.10 * m)
+        if best:
+            warnings.append(best)
+        elif not checked:
+            unchecked.append(DIST_NAMES.get(dt, str(dt)))
+    return warnings, unchecked
+
+
+def ace_warning_text(w: dict) -> str:
+    return (f"Slot 1 (+10% bonus): in {w['dist']} put {w['cand']} in slot 1 instead of {w['ace']}. In the {w['n']} "
+            f"sessions they ran together it averaged {fi(w['cand_avg'])} base points vs {fi(w['ace_avg'])}: about "
+            f"+{fi(w['gain'])} final points per session, small but free. "
+            + ("Clear difference." if w["z"] >= 2 else "Probable: a few more sessions will confirm it."))
+
+
 def dist_category_type(meters: Optional[int], dist_type: int) -> int:
     """Turf distance category as 1-4 (Sprint, Mile, Medium, Long), also for Dirt races."""
     return {"short": 1, "mile": 2, "middle": 3, "long": 4}[dist_category(meters, dist_type)]
@@ -1025,6 +1071,14 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         R.bullet(f"[~{fi(gain)}] {text}")
     for _prio, text in [x for x in notes if x[0] == 1]:
         R.bullet(f"[!] {text}")
+    ace_warn, ace_unchecked = ace_check(umas)
+    if not ace_warn:
+        R.bullet("Slot 1 (+10% bonus): " + (
+            f"already on the best uma in every distance that can be checked; not enough sessions together yet "
+            f"for {', '.join(ace_unchecked)}." if ace_unchecked else "already on the best uma in every distance."))
+    elif ace_unchecked:
+        R.bullet(f"Slot 1 cannot be checked yet for {', '.join(ace_unchecked)} (fewer than {MIN_RACES} sessions "
+                 f"with the current umas together).")
     R.p()
     if changes:
         R.p(f"The team changed in {len(changes)} {plural(len(changes), 'session', 'sessions')}: the advice covers "
@@ -1482,19 +1536,9 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                           + f". Raising it to {fi(target)} (~{pct(skill_chance(target))}) is worth ~{fi(gain)} "
                             f"per session."))
 
-    # Slot 1 (+10%): give it to the uma scoring the most base points in its distance
-    by_dist: Dict[int, List[UmaAgg]] = defaultdict(list)
-    for a in cur:
-        by_dist[a.last.dist_type].append(a)
-    for dt, group in sorted(by_dist.items()):
-        ace = next((a for a in group if a.last.slot == 1), None)
-        best = max(group, key=lambda a: a.avg("raw"))
-        if ace and best is not ace and best.n >= 2 and ace.n >= 2:
-            diff = best.avg("raw") - ace.avg("raw")
-            est.append((0.10 * diff,
-                        f"{DIST_NAMES.get(dt)}: put {best.name} first (slot 1) instead of {ace.name} "
-                        f"({fi(best.avg('raw'))} vs {fi(ace.avg('raw'))} average base): the +10% pays more on "
-                        f"the uma that scores more."))
+    # Slot 1 (+10%): warn when a teammate of the same distance would earn more with it
+    for w in ace_check(umas)[0]:
+        notes.append((1, ace_warning_text(w)))
 
     # Match victory (3+ race wins): 10,000 x (1 + opponent bonus) per session
     if sessions:

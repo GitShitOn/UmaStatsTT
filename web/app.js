@@ -252,6 +252,17 @@
     </div>`;
   }
 
+  function aceStatus(A) {
+    const { warnings, unchecked } = A.aceCheck;
+    if (warnings.length) {
+      return unchecked.length ? `<p class="note">Slot 1 cannot be checked yet for ${esc(unchecked.join(', '))}: fewer than ${E.MIN_RACES} sessions with the current umas together.</p>` : '';
+    }
+    const text = unchecked.length
+      ? `Slot 1 (+10% bonus) is already on the best uma in every distance that can be checked; not enough sessions together yet for ${unchecked.join(', ')}.`
+      : 'Slot 1 (+10% bonus) is already on the best uma in every distance.';
+    return `<p class="note"><span class="flag good">${esc(text)}</span></p>`;
+  }
+
   function secSummary(A) {
     const top = A.recs.est.slice(0, 5);
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
@@ -269,7 +280,8 @@
       <div class="panel"><h3>Score by session</h3>${sessionChart(A)}</div>
       <div class="section-head"><h3>The 5 things worth the most</h3><p class="note">Estimated extra final points per session. The full list is under “What to improve”.</p></div>
       ${actionList(top, max)}
-      ${apt.length ? `<div class="section-head"><h3>Aptitudes below A</h3></div>${noteList(apt)}` : ''}
+      ${apt.length ? `<div class="section-head"><h3>Warnings</h3></div>${noteList(apt)}` : ''}
+      ${aceStatus(A)}
       ${A.changes.length ? `<p class="note">The team changed in ${A.changes.length} ${plural(A.changes.length, 'session', 'sessions')}: the advice covers the current team, the one in the latest session (${esc(A.latest)}). Umas that left stay in the statistics marked “former”. <a href="#changes">See the changes</a>.</p>` : ''}
     </section>`;
   }
