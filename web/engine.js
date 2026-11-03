@@ -376,6 +376,7 @@
           startDelay: null, rushedSecs: 0, rushedLoss: 0, spurtLate: null, hpStart: null, hpEndPct: null,
           hpZeroLeft: null, blockedLate: null, multipliers: [],
         };
+        u.key = u.tcid ? String(u.tcid) : `${u.charaId}-${u.cardId}-${STAT_KEYS.map(([k]) => stats[k]).join('-')}`;
         (h.skill_array || []).forEach((s) => { u.skillsOwned[s.skill_id] = s.level || 1; });
         for (const s of c.score_array || []) {
           const bsum = sum((s.bonus_array || []).map((b) => b.bonus_score || 0));
@@ -466,26 +467,54 @@
   const staminaShort = (u) => hpOut(u) || spurtLate(u);
   const uniqueId = (u) => Object.keys(u.skillsOwned).map(Number).find((s) => s >= 100000 && s < 200000) ?? null;
 
+  /** Una voce per uma allenata. La squadra attuale e' quella dell'ultima sessione (in ordine di data). */
   function aggregateUmas(sessions) {
+    sessions = sessions.slice().sort((a, b) => a.label.localeCompare(b.label));
     const by = new Map();
     sessions.forEach((s) => s.races.forEach((r) => r.ours.forEach((u) => {
-      if (!by.has(u.tcid)) by.set(u.tcid, []);
-      by.get(u.tcid).push(u);
+      if (!by.has(u.key)) by.set(u.key, []);
+      by.get(u.key).push(u);
     })));
-    const aggs = [...by.entries()].map(([tcid, races]) => makeAgg(tcid, races));
-    const cnt = {};
-    aggs.forEach((a) => inc(cnt, a.name));
-    aggs.forEach((a) => { if (cnt[a.name] > 1) a.name = `${a.name} #${a.tcid}`; });
-    aggs.sort((a, b) => a.mainDist - b.mainDist || a.last.slot - b.last.slot || a.name.localeCompare(b.name));
+    const latest = sessions.length ? sessions[sessions.length - 1].label : null;
+    const aggs = [...by.entries()].map(([key, races]) => makeAgg(key, races, races.some((r) => r.session === latest)));
+    // stesso personaggio allenato piu' volte: v1, v2, ... in ordine di prima apparizione
+    const groups = {};
+    aggs.forEach((a) => { (groups[a.name] ||= []).push(a); });
+    Object.entries(groups).forEach(([name, g]) => { if (g.length > 1) g.forEach((a, i) => { a.name = `${name} v${i + 1}`; }); });
+    aggs.forEach((a) => { a.label = a.current ? a.name : `${a.name} (ex)`; });
+    aggs.sort((a, b) => a.mainDist - b.mainDist || (a.current === b.current ? 0 : a.current ? -1 : 1)
+      || a.last.slot - b.last.slot || a.name.localeCompare(b.name));
     return aggs;
   }
 
-  function makeAgg(tcid, races) {
+  /** Differenze di squadra tra una sessione e la precedente: uma entrate, uscite, spostate. */
+  function teamChanges(sessions, umas) {
+    const names = {};
+    umas.forEach((a) => { names[a.key] = a.name; });
+    const where = (v) => `${DIST_NAMES[v[0]] || v[0]}, slot ${v[1]}`;
+    const out = [];
+    let prev = null;
+    sessions.slice().sort((a, b) => a.label.localeCompare(b.label)).forEach((s) => {
+      const cur = {};
+      s.races.forEach((r) => r.ours.forEach((u) => { cur[u.key] = [u.distType, u.slot]; }));
+      if (prev) {
+        const entered = Object.keys(cur).filter((k) => !(k in prev)).map((k) => `${names[k] || k} (${where(cur[k])})`);
+        const left = Object.keys(prev).filter((k) => !(k in cur)).map((k) => names[k] || k);
+        const moved = Object.keys(cur).filter((k) => k in prev && (prev[k][0] !== cur[k][0] || prev[k][1] !== cur[k][1]))
+          .map((k) => `${names[k] || k}: ${where(prev[k])} → ${where(cur[k])}`);
+        if (entered.length || left.length || moved.length) out.push({ session: s.label, entered, left, moved });
+      }
+      prev = cur;
+    });
+    return out;
+  }
+
+  function makeAgg(key, races, current) {
     const distCount = {};
     races.forEach((r) => inc(distCount, r.distType));
     const dists = Object.keys(distCount).map(Number).sort((a, b) => distCount[b] - distCount[a] || a - b);
     const a = {
-      tcid, name: races[0].name, races, n: races.length, last: races[races.length - 1],
+      key, tcid: races[0].tcid, current, name: races[0].name, races, n: races.length, last: races[races.length - 1],
       mainDist: dists[0], distLabel: dists.map((d) => DIST_NAMES[d] || d).join('/'),
       avg: (fn) => mean(races.map(fn)),
       count: (pred) => races.filter(pred).length,
@@ -510,9 +539,14 @@
   function makeRecommendations(umas, races, allUr, mult, skills) {
     const est = []; const notes = [];
     const nSessions = Math.max(1, new Set(races.map((r) => r.session)).size);
+    const labels = {};
+    umas.forEach((a) => { labels[a.key] = a.label; });
+    // i consigli riguardano solo la squadra attuale (ultima sessione); lo storico resta nelle statistiche
+    const cur = umas.filter((a) => a.current).length ? umas.filter((a) => a.current) : umas;
 
-    for (const a of umas) {
-      const n = a.n; const m = a.multiplier; const st = a.last.stats; const perSession = n / nSessions; const u = a.last;
+    for (const a of cur) {
+      // ogni uma della squadra corre una gara a sessione
+      const n = a.n; const m = a.multiplier; const st = a.last.stats; const perSession = 1; const u = a.last;
       const bad = [];
       if (u.aptDist != null && u.aptDist < 7) bad.push(`distanza ${APT[u.aptDist] || '?'} (velocità ridotta)`);
       if (u.aptGround != null && u.aptGround < 7) bad.push(`terreno ${APT[u.aptGround] || '?'}`);
@@ -538,7 +572,7 @@
         }
       }
 
-      if (a.races.some((r) => uniqueId(r) != null)) {
+      if (n >= 2 && a.races.some((r) => uniqueId(r) != null)) {
         const k = a.count((r) => get(r.catCount, 'unique') > 0);
         if (k / n < 0.6) {
           const val = mean(a.races.map((r) => r.uniqueValue).filter(Boolean)) || 2400;
@@ -559,12 +593,12 @@
     const rushedUr = allUr.filter(isRushed);
     if (rushedUr.length) {
       const loss = sum(rushedUr.map((u) => u.rushedLoss * (mean(u.multipliers) ?? mult))) / nSessions;
-      const risky = umas.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
+      const risky = cur.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
       est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${allUr.length} uma-gare: circa ${fi(loss)} finali persi a sessione solo di penalità, e l'HP sprecata costa anche posizioni. Rischio teorico più alto: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
     }
 
     const target = 1000; const witItems = [];
-    for (const a of umas) {
+    for (const a of cur) {
       const wiz = a.last.stats.wiz;
       if (wiz >= target) continue;
       const acts = mean(a.races.map((r) => get(r.catCount, 'white') + get(r.catCount, 'gold'))) || 0;
@@ -572,7 +606,7 @@
       if (!acts) continue;
       const pNow = skillChance(wiz); const pTgt = skillChance(target);
       const extraRaw = acts / pNow * (pTgt - pNow) * (pts / acts);
-      witItems.push({ gain: extraRaw * a.multiplier * a.n / nSessions, a, p: pNow });
+      witItems.push({ gain: extraRaw * a.multiplier, a, p: pNow });
     }
     if (witItems.length) {
       const gain = sum(witItems.map((x) => x.gain));
@@ -581,21 +615,21 @@
     }
 
     const byDist = {};
-    umas.forEach((a) => { (byDist[a.mainDist] ||= []).push(a); });
+    cur.forEach((a) => { (byDist[a.last.distType] ||= []).push(a); });
     Object.keys(byDist).map(Number).sort((x, y) => x - y).forEach((dt) => {
       const group = byDist[dt];
       const ace = group.find((a) => a.last.slot === 1);
       const best = group.reduce((x, y) => (y.avg((r) => r.raw) > x.avg((r) => r.raw) ? y : x));
-      if (ace && best !== ace && best.n >= 2) {
+      if (ace && best !== ace && best.n >= 2 && ace.n >= 2) {
         const diff = best.avg((r) => r.raw) - ace.avg((r) => r.raw);
-        est.push({ gain: 0.1 * diff * best.n / nSessions, kind: 'ace', text: `${DIST_NAMES[dt]}: metti ${best.name} come prima uma (slot 1) al posto di ${ace.name} (${fi(best.avg((r) => r.raw))} contro ${fi(ace.avg((r) => r.raw))} base medi). Il +10% rende di più sull'uma che fa più punti.` });
+        est.push({ gain: 0.1 * diff, kind: 'ace', text: `${DIST_NAMES[dt]}: metti ${best.name} come prima uma (slot 1) al posto di ${ace.name} (${fi(best.avg((r) => r.raw))} contro ${fi(ace.avg((r) => r.raw))} base medi). Il +10% rende di più sull'uma che fa più punti.` });
       }
     });
 
     const missed = races.filter((r) => !r.teamIds.length);
     if (missed.length) {
       const culprits = {};
-      missed.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprits, out[0].name); });
+      missed.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprits, labels[out[0].key] || out[0].name); });
       const teamMult = mean(races.filter((r) => r.teamRaw).map((r) => r.teamFinal / r.teamRaw)) ?? mult;
       const gain = missed.length / nSessions * 4000 * teamMult;
       const who = Object.entries(culprits).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([nm, c]) => `${nm} (${c})`).join(', ');
@@ -610,7 +644,7 @@
       START_SKILLS.forEach((sid) => {
         const g = startsUr.filter((u) => u.skillsOwned[sid] != null && !done.has(u));
         g.forEach((u) => done.add(u));
-        if (g.length) parts.push(`${skills.name(sid) || sid} ${g.filter((u) => get(u.catCount, 'start')).length}/${g.length} (${[...new Set(g.map((u) => u.name))].sort().join(', ')})`);
+        if (g.length) parts.push(`${skills.name(sid) || sid} ${g.filter((u) => get(u.catCount, 'start')).length}/${g.length} (${[...new Set(g.map((u) => labels[u.key] || u.name))].sort().join(', ')})`);
       });
       const rest = startsUr.filter((u) => !done.has(u));
       if (rest.length) parts.push(`nessuna delle due ${rest.filter((u) => get(u.catCount, 'start')).length}/${rest.length}`);
@@ -621,14 +655,19 @@
 
     const l16 = allUr.filter((u) => get(u.catCount, 'lead16')).length / allUr.length;
     const l23 = allUr.filter((u) => get(u.catCount, 'lead23')).length / allUr.length;
-    const neverLead = umas.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
+    const neverLead = cur.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
     notes.push({ prio: 4, text: `«1ª del suo stile» (1.000 base a 1/6 e 1.000 a 2/3 di gara) ottenuto nel ${pct(l16)} e nel ${pct(l23)} dei casi${neverLead.length ? `; mai da ${neverLead.join(', ')}` : ''}. Conta essere davanti alle altre uma con la stessa strategia, avversarie comprese.` });
 
-    const worst = umas.slice().sort((x, y) => y.avg((r) => r.finish) - x.avg((r) => r.finish)).slice(0, 3);
+    const few = cur.filter((a) => a.n < 3);
+    if (few.length && few.length < cur.length) {
+      notes.push({ prio: 2, text: `Poche gare per giudicare con sicurezza: ${few.map((a) => `${a.name} (${a.n} ${a.n === 1 ? 'gara' : 'gare'})`).join(', ')}. Le loro statistiche diventano affidabili dopo qualche sessione.` });
+    }
+
+    const worst = cur.slice().sort((x, y) => y.avg((r) => r.finish) - x.avg((r) => r.finish)).slice(0, 3);
     notes.push({ prio: 2, text: `Il piazzamento è la voce principale: circa 1.000 base (${fi(1000 * mult)} finali) a posizione, e tra 1ª e 2ª ci sono 2.000 base più il margine. Piazzamento medio peggiore: ${worst.map((a) => `${a.name} ${ff(a.avg((r) => r.finish), 1)}`).join(', ')}.` });
 
     const neverCounts = [];
-    umas.forEach((a) => {
+    cur.forEach((a) => {
       const { owned, acts } = umaSkills(a);
       const nv = Object.keys(owned).filter((s) => !acts[s]).length;
       if (nv && a.n >= 3) neverCounts.push([nv, a.name]);
@@ -651,6 +690,9 @@
     const races = sessions.flatMap((s) => s.races);
     const allUr = races.flatMap((r) => r.ours);
     const umas = aggregateUmas(sessions);
+    const labels = {};
+    umas.forEach((a) => { labels[a.key] = a.label; });
+    const changes = teamChanges(sessions, umas);
     const nRaces = races.length;
     const nSessions = sessions.length;
 
@@ -724,7 +766,8 @@
       const hasUnique = a.races.some((r) => uniqueId(r) != null);
       const uid = uniqueId(a.last);
       return {
-        tcid: a.tcid, name: a.name, distLabel: a.distLabel, mainDist: a.mainDist, style: a.last.style,
+        key: a.key, tcid: a.tcid, name: a.name, label: a.label, current: a.current,
+        distLabel: a.distLabel, mainDist: a.mainDist, style: a.last.style,
         slot: a.last.slot, n: a.n, multiplier: a.multiplier,
         finishes: a.races.map((r) => r.finish),
         avgFinish: a.avg((r) => r.finish), avgRaw: a.avg((r) => r.raw), avgFinal: a.avg((r) => r.final),
@@ -768,7 +811,7 @@
       const best = r.ours.slice().sort((x, y) => x.finish - y.finish)[0];
       return { session: r.session, rnd: r.rnd, dist: DIST_NAMES[r.distType], distance: r.distance,
         winner: w ? { name: w.name, style: STYLE_NAMES[w.style] || '?', stats: w.stats } : null,
-        best: best ? { name: best.name, finish: best.finish } : null };
+        best: best ? { name: labels[best.key] || best.name, finish: best.finish } : null };
     });
 
     const raceRows = sessions.map((s) => ({
@@ -777,7 +820,7 @@
         rnd: r.rnd, dist: DIST_NAMES[r.distType] || String(r.distType), distType: r.distType, distance: r.distance,
         weather: WEATHER_NAMES[r.weather] || '?', ground: GROUND_NAMES[r.ground] || '?', win: r.win,
         total: r.total, teamFinal: r.teamFinal, checkOk: r.checkOk,
-        ours: r.ours.slice().sort((x, y) => x.finish - y.finish).map((u) => ({ ...raceNoteRow(u), name: u.name })),
+        ours: r.ours.slice().sort((x, y) => x.finish - y.finish).map((u) => ({ ...raceNoteRow(u), name: labels[u.key] || u.name })),
         opponents: r.opponents.slice().sort((x, y) => x.finish - y.finish).map((o) => ({ name: o.name, slot: o.slot, finish: o.finish, style: STYLE_NAMES[o.style] || '' })),
       })),
     }));
@@ -786,7 +829,8 @@
     const unnamed = [...new Set(allUr.flatMap((u) => Object.keys(u.skillsOwned).map(Number)))].filter((s) => !skills.name(s));
 
     return {
-      nSessions, nRaces, nUmas: umas.length, mult, bonuses, sessions: sessionRows,
+      nSessions, nRaces, nUmas: umas.length, nCurrent: umas.filter((a) => a.current).length,
+      latest: sessions.length ? sessions[sessions.length - 1].label : null, changes, mult, bonuses, sessions: sessionRows,
       totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
       raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
       wins: races.filter((r) => r.win).length,
@@ -824,14 +868,16 @@
 
   function umaRacesCSV(sessions) {
     const cats = CATEGORY_ORDER.filter((k) => k !== 'team');
-    const lines = [csvLine(['sessione', 'gara', 'distanza_tipo', 'metri', 'vinta', 'uma', 'tcid', 'slot', 'stile',
+    const agg = {};
+    aggregateUmas(sessions).forEach((a) => { agg[a.key] = a; });
+    const lines = [csvLine(['sessione', 'gara', 'distanza_tipo', 'metri', 'vinta', 'uma', 'in_squadra', 'tcid', 'slot', 'stile',
       'SPD', 'STA', 'POW', 'GUT', 'WIT', 'umore', 'popolarita', 'arrivo', 'punti_base', 'punti_finali',
       ...cats.map((k) => `base_${k}`), 'skill_bianche', 'skill_oro', 'skill_unica', 'ritardo_partenza',
       'rushed_secondi', 'hp_finale_pct', 'hp_finita_m_al_traguardo', 'sprint_ritardo_m', 'bloccata_pct'])];
     const r1 = (x, d = 1) => (x == null ? '' : Math.round(x * 10 ** d) / 10 ** d);
     sessions.forEach((s) => s.races.forEach((r) => r.ours.forEach((u) => {
       lines.push(csvLine([s.label, r.rnd, DIST_NAMES[r.distType] || r.distType, r.distance || '', r.win ? 1 : 0,
-        u.name, u.tcid, u.slot, STYLE_NAMES[u.style] || u.style, ...STAT_KEYS.map(([k]) => u.stats[k]),
+        agg[u.key].name, agg[u.key].current ? 1 : 0, u.tcid, u.slot, STYLE_NAMES[u.style] || u.style, ...STAT_KEYS.map(([k]) => u.stats[k]),
         u.mood, u.popularity, u.finish, u.raw, u.final, ...cats.map((k) => get(u.catRaw, k)),
         get(u.catCount, 'white'), get(u.catCount, 'gold'), get(u.catCount, 'unique'), r1(u.startDelay, 4),
         u.rushedSecs, u.hpEndPct == null ? '' : r1(100 * u.hpEndPct), r1(u.hpZeroLeft), r1(u.spurtLate),
@@ -841,11 +887,11 @@
   }
 
   function skillsCSV(sessions, skills) {
-    const lines = [csvLine(['uma', 'tcid', 'skill_id', 'nome', 'livello', 'tipo', 'gare', 'attivazioni', 'punti_base'])];
+    const lines = [csvLine(['uma', 'in_squadra', 'tcid', 'skill_id', 'nome', 'livello', 'tipo', 'gare', 'attivazioni', 'punti_base'])];
     aggregateUmas(sessions).forEach((a) => {
       const { owned, acts, types, pts } = umaSkills(a);
       Object.keys(owned).map(Number).sort((x, y) => x - y).forEach((sid) => {
-        lines.push(csvLine([a.name, a.tcid, sid, skills.name(sid) || '', owned[sid], skills.kind(sid, types[sid]),
+        lines.push(csvLine([a.name, a.current ? 1 : 0, a.tcid, sid, skills.name(sid) || '', owned[sid], skills.kind(sid, types[sid]),
           a.n, get(acts, sid), get(pts, sid)]));
       });
     });

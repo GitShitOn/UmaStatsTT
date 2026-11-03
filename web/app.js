@@ -149,6 +149,7 @@
     const cls = r >= badAt ? 'bad' : r >= warnAt ? '' : null;
     return cls === null ? `${k}/${n}` : `<span class="flag ${cls}">${k}/${n}</span>`;
   };
+  const umaTag = (u) => (!u.current ? ' <span class="tag ex">ex</span>' : u.slot === 1 ? ' <span class="tag">1ª</span>' : '');
   const tile = (label, value, sub) => `<div class="tile"><span class="tile-label">${esc(label)}</span><span class="tile-value">${esc(value)}</span>${sub ? `<span class="tile-sub">${esc(sub)}</span>` : ''}</div>`;
   const sectionHead = (id, eyebrow, title, intro) => `<div class="section-head"><p class="eyebrow">${esc(eyebrow)}</p><h2 id="h-${id}">${esc(title)}</h2>${intro ? `<p>${intro}</p>` : ''}</div>`;
   const noteFlags = (notes) => (notes.length ? `<span class="noteline">${notes.map((x) => `<span class="flag ${x.s === 'bad' ? 'bad' : x.s === 'good' ? 'good' : ''}">${esc(x.t)}</span>`).join('')}</span>` : '');
@@ -180,6 +181,7 @@
       <div class="section-head"><h3>Le 5 cose che valgono di più</h3><p class="note">Stima dei punti finali in più a sessione. L'elenco completo è in «Cosa migliorare».</p></div>
       ${actionList(top, max)}
       ${apt.length ? `<div class="section-head"><h3>Attitudini sotto A</h3></div>${noteList(apt)}` : ''}
+      ${A.changes.length ? `<p class="note">La squadra è cambiata in ${A.changes.length} ${A.changes.length === 1 ? 'sessione' : 'sessioni'}: i consigli riguardano la squadra attuale, quella dell'ultima sessione (${esc(A.latest)}). Le uma uscite restano nelle statistiche con il segno «ex». <a href="#cambi">Vedi i cambi</a>.</p>` : ''}
     </section>`;
   }
 
@@ -268,11 +270,11 @@
         html += `<div class="stack-group">${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</div>`;
         lastDist = u.mainDist;
       }
-      const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.name}`, 'punti base medi a gara')}></i>`).join('');
+      const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'punti base medi a gara')}></i>`).join('');
       const rushed = u.src.rushed ? ` · rushed ${fi(u.src.rushed)}` : '';
-      html += `<div class="stack-row"><div class="stack-name" title="${esc(u.name)}">${esc(u.name)}${u.slot === 1 ? ' <span class="tag">1ª</span>' : ''}</div>
-        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.name}: ${fi(totals[i])} punti base medi a gara${rushed}`)}">${segs}</div></div>
-        <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.name} · punti base medi a gara`, u.src.rushed ? `di cui rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
+      html += `<div class="stack-row${u.current ? '' : ' ex'}"><div class="stack-name" title="${esc(u.label)}">${esc(u.name)}${umaTag(u)}</div>
+        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} punti base medi a gara${rushed}`)}">${segs}</div></div>
+        <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · punti base medi a gara`, u.src.rushed ? `di cui rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
     });
     const ticks = [];
     for (let v = 0; v <= max + 1e-6; v += step) ticks.push(`<span style="left:${((v / max) * 100).toFixed(2)}%">${compact(v)}</span>`);
@@ -286,8 +288,8 @@
       const d = u.diag; const n = u.n;
       const uniRate = d.uniqueK / n < 0.6 ? `<span class="flag${d.uniqueK === 0 ? ' bad' : ''}">${d.uniqueK}/${n}</span>` : `${d.uniqueK}/${n}`;
       const uni = d.hasUnique ? `${uniRate}${d.uniqueLevel ? ` <span class="muted">L${d.uniqueLevel}</span>` : ''}` : '–';
-      return `<tr>
-        <td class="first">${esc(u.name)}</td>
+      return `<tr${u.current ? '' : ' class="ex"'}>
+        <td class="first">${esc(u.name)}${umaTag(u)}</td>
         <td>${posRow(u.finishes)}</td>
         <td class="n">${fi(u.avgRaw)}</td>
         <td class="n">${ff(d.white, 1)}</td>
@@ -314,9 +316,10 @@
     const apt = (v) => esc(E.APT[v] || '?');
     const races = u.races.map((r) => `<tr><td>${esc(shortLabel(r.session))} · G${r.rnd}</td><td>${r.distance ? `${fi(r.distance)} m` : '–'}</td><td>${posBadge(r.finish)}</td><td class="n">${r.popularity}</td><td>${esc(r.mood)}</td><td class="n">${fi(r.raw)}</td><td class="n">${fi(r.final)}</td><td class="n">${r.white}/${r.gold}/${r.unique}</td><td class="wrap">${noteFlags(r.notes)}</td></tr>`).join('');
     const sk = u.skills.map((s) => `<tr><td class="wrap">${esc(s.name || '?')}${s.acts ? '' : ' <span class="flag">mai</span>'}</td><td class="n muted">${s.id}</td><td>${esc(s.kind)}</td><td class="n">L${s.level}</td><td class="n">${s.acts}/${u.n}</td><td class="n">${fi(s.points)}</td></tr>`).join('');
-    return `<details class="card" id="uma-${u.tcid}">
+    const tag = !u.current ? ' <span class="tag ex">non più in squadra</span>' : u.slot === 1 ? ' <span class="tag">prima uma</span>' : '';
+    return `<details class="card${u.current ? '' : ' ex'}" id="uma-${esc(u.key)}">
       <summary>
-        <span class="card-title"><strong>${esc(u.name)}</strong><span>${distChip(u.mainDist, u.distLabel)} ${esc(style)}${u.slot === 1 ? ' <span class="tag">prima uma</span>' : ''}</span></span>
+        <span class="card-title"><strong>${esc(u.name)}</strong><span>${distChip(u.mainDist, u.distLabel)} ${esc(style)}${tag}</span></span>
         ${posRow(u.finishes)}
         <span class="card-score"><b>${fi(u.avgRaw)} base</b>${fi(u.avgFinal)} finali a gara</span>
       </summary>
@@ -337,9 +340,23 @@
       </div></details>`;
   }
 
+  function teamChangesPanel(A) {
+    if (!A.changes.length) return '';
+    const items = A.changes.map((c) => {
+      const parts = [];
+      if (c.entered.length) parts.push(`<b>entrano</b> ${esc(c.entered.join(', '))}`);
+      if (c.left.length) parts.push(`<b>escono</b> ${esc(c.left.join(', '))}`);
+      if (c.moved.length) parts.push(`<b>spostate</b> ${esc(c.moved.join(', '))}`);
+      return `<li><span class="muted">${esc(shortLabel(c.session))}</span> ${parts.join('; ')}</li>`;
+    }).join('');
+    return `<div class="panel" id="cambi"><h3>Cambi di squadra</h3><ul class="changes">${items}</ul>
+      <p class="note">Le uma uscite restano nelle statistiche, segnate «ex» e più chiare; i consigli guardano solo la squadra attuale.</p></div>`;
+  }
+
   function secUmas(A) {
     return `<section class="section" id="uma" aria-labelledby="h-uma">
       ${sectionHead('uma', 'Uma', 'Rendimento di ogni uma', 'Punti base medi a gara divisi per fonte. Tocca una barra per il dettaglio, apri una scheda per gare e skill.')}
+      ${teamChangesPanel(A)}
       <div class="panel">${umaStack(A)}</div>
       <div class="section-head"><h3>Diagnostica</h3></div>
       ${diagTable(A)}
@@ -378,10 +395,10 @@
   }
 
   function secSkills(A) {
-    const items = A.umas.filter((u) => u.never.length).map((u) => `<div class="never-item"><strong>${esc(u.name)}</strong>
+    const items = A.umas.filter((u) => u.current && u.never.length).map((u) => `<div class="never-item"><strong>${esc(u.name)}</strong>
       <ul>${u.never.map((s) => `<li>${esc(s.name || String(s.id))} <small>${esc(s.kind)}</small></li>`).join('')}</ul></div>`).join('');
     return `<section class="section" id="skill" aria-labelledby="h-skill">
-      ${sectionHead('skill', 'Skill', 'Skill mai attivate', `Ogni attivazione vale punti base: bianca o unica ereditata 500, oro 1.200, unica 2.300-2.500. Anche le passive contano. Qui sotto le skill che non si sono mai attivate in nessuna gara; la tabella completa è nella scheda di ogni uma.`)}
+      ${sectionHead('skill', 'Skill', 'Skill mai attivate', `Ogni attivazione vale punti base: bianca o unica ereditata 500, oro 1.200, unica 2.300-2.500. Anche le passive contano. Qui sotto le skill della squadra attuale che non si sono mai attivate in nessuna gara; la tabella completa è nella scheda di ogni uma.`)}
       ${items ? `<div class="panel never-list">${items}</div>` : '<p class="note">Tutte le skill si sono attivate almeno una volta.</p>'}
       ${A.unnamed.length ? `<p class="note">${A.unnamed.length} skill non hanno un nome nel database: carica un file JSON di nomi (id → nome) per completarle.</p>` : ''}
     </section>`;
@@ -451,7 +468,7 @@
     let text = '';
     let actions = '';
     if (A) {
-      const what = `${A.nSessions} ${A.nSessions === 1 ? 'sessione' : 'sessioni'} · ${A.nRaces} gare · ${A.nUmas} uma`;
+      const what = `${A.nSessions} ${A.nSessions === 1 ? 'sessione' : 'sessioni'} · ${A.nRaces} gare · ${A.nCurrent} uma in squadra${A.nUmas > A.nCurrent ? ` (+${A.nUmas - A.nCurrent} uscite)` : ''}`;
       if (state.source === 'demo') text = `<strong>Esempio:</strong> ${esc(state.demoLabel)} (${what}). Carica i tuoi file per sostituirlo.`;
       else if (state.source === 'saved') text = `${what}. File ricordati da questo dispositivo.`;
       else text = `${what}.`;

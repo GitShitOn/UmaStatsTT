@@ -127,6 +127,22 @@ si aggiunge il bonus squadra. Lo script verifica che la somma coincida con `team
 
 In pratica 1 punto base vale circa 2,65 punti finali. Per salire contano i punti base.
 
+## Se cambi la squadra tra una sessione e l'altra
+
+Ogni uma allenata viene riconosciuta dal suo `trained_chara_id`. In questo modo le
+statistiche di uma diverse non si mescolano mai, anche se sono lo stesso personaggio.
+
+- La **squadra attuale** è quella dell'ultima sessione: l'ordine è dato dalla data nel nome
+  del file `TT-AAAAMMGG_hhmmss`. I consigli riguardano solo la squadra attuale.
+- Le uma uscite restano nelle statistiche, segnate **(ex)** nello script ed «ex» nella
+  webapp, e non generano consigli.
+- Se ri-alleni lo stesso personaggio, le versioni diventano `v1`, `v2`, ... in ordine di
+  apparizione.
+- Una sezione elenca i cambi tra una sessione e l'altra: uma entrate, uscite e spostate di
+  distanza o di slot.
+- Per le uma con meno di 3 gare il report lo segnala, e la skill unica non viene giudicata
+  dopo una sola gara.
+
 ## Limiti
 
 - I file contengono i punteggi della tua squadra, non quelli degli avversari.
