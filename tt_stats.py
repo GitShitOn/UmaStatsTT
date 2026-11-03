@@ -84,10 +84,16 @@ CATEGORY_LABELS = {
     "time": "Time bonus (under reference time)",
     "rushed": "Rushed (penalty)",
     "team": "Team bonus",
+    "victory": "Match victory (3+ race wins)",
     "other": "Other",
 }
 CATEGORY_ORDER = ["place", "margin", "upset", "unique", "gold", "white", "start",
-                  "lead16", "lead23", "time", "rushed", "team", "other"]
+                  "lead16", "lead23", "time", "rushed", "team", "victory", "other"]
+
+# Match victory: winning 3 or more of the 5 races gives 10,000 points on the match result screen,
+# multiplied only by the opponent bonus. It is not in the race scores, so it is computed here.
+VICTORY_BASE = 10000
+VICTORY_WINS = 3
 SKILL_CATS = ("unique", "gold", "white")
 
 
@@ -172,6 +178,8 @@ LEGEND = [
     "Time bonus: +100 per 0.1 s under a course reference time (up to 2,000 seen), mostly on Sprint and Mile.",
     "Rushed: -500 when it starts and -100 for every second it lasts.",
     "Team: +4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.",
+    "Match victory: +10,000 if you win 3 or more of the 5 races, given on the match result screen; only the "
+    "opponent bonus applies to it (e.g. 10,000 x 2.55 with a +155% opponent bonus).",
     "Percentage bonuses on every item: opponent (+1.3 points per 1,000 opponent rating, -0.8 per 1,000 of your "
     "own), support cards (~+10%), first uma of the distance / slot 1 (+10%), win streak (+2% on the 2nd win in a "
     "row up to +5% on the 5th).",
@@ -421,12 +429,34 @@ class Session:
     bonus_rates: Dict[str, List[float]]
 
     @property
-    def total(self) -> int:
+    def race_total(self) -> int:
         return sum(r.total for r in self.races)
 
     @property
     def wins(self) -> int:
         return sum(1 for r in self.races if r.win)
+
+    @property
+    def opp_rate(self) -> Optional[float]:
+        v = self.bonus_rates.get("opponent")
+        if v:
+            return mean(v)
+        if self.opp_eval and self.self_eval:
+            return opp_bonus_model(self.opp_eval, self.self_eval)
+        return None
+
+    @property
+    def victory(self) -> bool:
+        return self.wins >= VICTORY_WINS
+
+    @property
+    def victory_bonus(self) -> int:
+        """Match victory points (not in the file: computed from the rule)."""
+        return round(VICTORY_BASE * (1 + (self.opp_rate or 0))) if self.victory else 0
+
+    @property
+    def total(self) -> int:
+        return self.race_total + self.victory_bonus
 
 
 STAT_KEYS = [("speed", "SPD"), ("stamina", "STA"), ("pow", "POW"), ("guts", "GUT"), ("wiz", "WIT")]
@@ -889,7 +919,7 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         for k, v in s.bonus_rates.items():
             allrates[k] += v
     mult_std = 1 + sum(safe_mean(allrates.get(k, []), 0) for k in ("opponent", "support"))
-    est, notes = make_recommendations(umas, races, all_ur, mult_std, skills)
+    est, notes = make_recommendations(umas, races, all_ur, mult_std, skills, sessions)
 
     R.h2("Summary")
     rel = reliability(umas, sessions)
@@ -915,12 +945,15 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     for s in sessions:
         opp = safe_mean(s.bonus_rates.get("opponent", []))
         sup = safe_mean(s.bonus_rates.get("support", []))
-        rows.append([s.label, fi(s.total), f"{s.wins}-{len(s.races) - s.wins}", fi(s.total / max(1, len(s.races))),
+        rows.append([s.label, fi(s.total), f"{s.wins}-{len(s.races) - s.wins}",
+                     fi(s.victory_bonus) if s.victory else "-", fi(s.race_total),
                      fi(s.opp_eval), pct(opp, 1), pct(sup, 2)])
     tot = sum(s.total for s in sessions)
+    n_vic = sum(1 for s in sessions if s.victory)
     rows.append(["AVERAGE", fi(tot / len(sessions)), ff(sum(s.wins for s in sessions) / len(sessions), 1) + " W",
-                 fi(tot / n_races), "", "", ""])
-    R.table(["Session", "Score", "W-L", "Per race", "Opp. rating", "Opp. bonus", "Support"], rows)
+                 f"{n_vic}/{len(sessions)}", fi(sum(s.race_total for s in sessions) / len(sessions)), "", "", ""])
+    R.table(["Session", "Score", "W-L", "Victory", "Races", "Opp. rating", "Opp. bonus", "Support"], rows)
+    R.p("Score = points of the 5 races + match victory bonus (3+ race wins; computed, it is not in the files).")
     if changes:
         R.p("Team changes:")
         for c in changes:
@@ -969,9 +1002,13 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R.p("Base points per event (observed):")
     rows = []
     for ck in CATEGORY_ORDER:
-        if ck not in unit_vals and ck != "team":
+        if ck not in unit_vals and ck not in ("team", "victory"):
             continue
-        if ck == "team":
+        if ck == "victory":
+            if not any(s.victory for s in sessions):
+                continue
+            vals = fi(VICTORY_BASE)
+        elif ck == "team":
             tv = sorted({r.team_raw for r in races if r.team_raw})
             if not tv:
                 continue
@@ -984,6 +1021,7 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R.p("Finishing position: 1st 10,000, 2nd 8,000, 3rd 7,000, 4th 6,000, 5th 5,000, 6th-7th 4,000 ... "
         "(about -1,000 per place).")
     R.p("Team: all 3 in the top 5 = 4,000, all 3 in the top 3 = 5,000.")
+    R.p("Match victory: 10,000 for winning 3+ of the 5 races; only the opponent bonus applies.")
 
     # ---------------- Where the points come from
     R.h2("Where the points come from")
@@ -1001,18 +1039,24 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     cat_final["team"] += sum(r.team_final for r in races)
     cat_cnt["team"] += sum(1 for r in races if r.team_ids)
     cat_hits["team"] += sum(1 for r in races if r.team_ids)
+    won = [s for s in sessions if s.victory]
+    cat_raw["victory"] += VICTORY_BASE * len(won)
+    cat_final["victory"] += sum(s.victory_bonus for s in won)
+    cat_cnt["victory"] += len(won)
+    cat_hits["victory"] += len(won)
     grand = sum(cat_final.values())
     rows = []
     for ck in CATEGORY_ORDER:
         if not cat_raw.get(ck) and not cat_cnt.get(ck):
             continue
-        denom = n_races if ck == "team" else len(all_ur)
+        denom = n_races if ck == "team" else len(sessions) if ck == "victory" else len(all_ur)
         rows.append([CATEGORY_LABELS[ck], fi(cat_cnt[ck]), f"{cat_hits[ck]}/{denom}",
                      fi(cat_raw[ck]), fi(cat_final[ck]), pct(cat_final[ck] / grand, 1),
                      fi(cat_final[ck] / n_races)])
     rows.append(["TOTAL", "", "", fi(sum(cat_raw.values())), fi(grand), "100%", fi(grand / n_races)])
     R.table(["Category", "Events", "Present", "Base total", "Final total", "% total", "Final/race"], rows)
-    R.p("'Present' = in how many runs (one uma in one race; for the team bonus: races) the category shows up.")
+    R.p("'Present' = in how many runs (one uma in one race; for the team bonus: races; for the victory: sessions)")
+    R.p("the category shows up.")
 
     # ---------------- By distance
     R.h2("By distance")
@@ -1235,7 +1279,8 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
 
 
 def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[UmaRace], mult: float,
-                         skills: Optional[SkillDB] = None) -> Tuple[List[Tuple[float, str]], List[Tuple[int, str]]]:
+                         skills: Optional[SkillDB] = None, sessions: Optional[List[Session]] = None
+                         ) -> Tuple[List[Tuple[float, str]], List[Tuple[int, str]]]:
     """Returns (estimates, notes).
 
     estimates = [(estimated gain in FINAL points per session, text)]
@@ -1358,6 +1403,24 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                         f"({fi(best.avg('raw'))} vs {fi(ace.avg('raw'))} average base): the +10% pays more on "
                         f"the uma that scores more."))
 
+    # Match victory (3+ race wins): 10,000 x (1 + opponent bonus) per session
+    if sessions:
+        lost_m = [s for s in sessions if not s.victory]
+        if lost_m:
+            val = safe_mean([10000 * (1 + (s.opp_rate or 0)) for s in sessions], 0)
+            near = sum(1 for s in lost_m if s.wins == VICTORY_WINS - 1)
+            gain = len(lost_m) / len(sessions) * val
+            firsts = []
+            for dt in sorted({r.dist_type for r in races}):
+                rs = [r for r in races if r.dist_type == dt]
+                firsts.append((sum(1 for r in rs if r.winner_side == "us") / len(rs), DIST_NAMES.get(dt, dt)))
+            firsts.sort()
+            weak = ", ".join(f"{nm} {pct(p)}" for p, nm in firsts[:2])
+            est.append((gain, f"Match victory (3+ race wins, 10,000 base x the opponent bonus = ~{fi(val)} final) "
+                              f"missed in {len(lost_m)}/{len(sessions)} sessions, {near} of them by a single race: "
+                              f"worth up to ~{fi(gain)} per session. A race is won by the team with the 1st-place "
+                              f"uma; you take 1st least often in {weak}."))
+
     # Missed team bonus: who stays out of the top 5?
     missed = [r for r in races if not r.team_ids]
     if missed:
@@ -1401,7 +1464,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     per_k = OPP_BONUS_FIT[1] * 1000 * base_per_session
     notes.append((2, f"Opponent choice: every +1,000 opponent rating adds {ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the "
                      f"opponent bonus, about {fi(per_k)} final points per session at your scores. Pick the strongest "
-                     f"opponent you can still finish ahead of: stronger rivals also push your umas down the order."))
+                     f"opponent you can still beat: stronger rivals also push your umas down the order and can cost "
+                     f"the match victory (10,000 base)."))
 
     # Leads own strategy
     l16 = sum(1 for u in all_ur if u.cat_count["lead16"]) / len(all_ur)

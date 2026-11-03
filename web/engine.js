@@ -52,10 +52,16 @@
     time: 'Time bonus (under reference time)',
     rushed: 'Rushed (penalty)',
     team: 'Team bonus',
+    victory: 'Match victory (3+ race wins)',
     other: 'Other',
   };
   const CATEGORY_ORDER = ['place', 'margin', 'upset', 'unique', 'gold', 'white', 'start',
-    'lead16', 'lead23', 'time', 'rushed', 'team', 'other'];
+    'lead16', 'lead23', 'time', 'rushed', 'team', 'victory', 'other'];
+
+  // Match victory: winning 3 or more of the 5 races gives 10,000 points on the match result screen,
+  // multiplied only by the opponent bonus. It is not in the race scores, so it is computed here.
+  const VICTORY_BASE = 10000;
+  const VICTORY_WINS = 3;
   const SKILL_CATS = ['unique', 'gold', 'white'];
 
   const LEGEND = [
@@ -68,6 +74,7 @@
     ['Time bonus', '+100 per 0.1 s under a course reference time (up to 2,000 seen), mostly on Sprint and Mile.'],
     ['Rushed', '−500 when it starts and −100 for every second it lasts.'],
     ['Team bonus', '+4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3.'],
+    ['Match victory', '+10,000 if you win 3 or more of the 5 races, given on the match result screen; only the opponent bonus applies to it (e.g. 10,000 × 2.55 with a +155% opponent bonus).'],
     ['Percentage bonuses', 'On every item: opponent (+1.3 points per 1,000 opponent rating, −0.8 per 1,000 of your own), support cards (about +10%), first uma of the distance (+10%), win streak (+2% on the 2nd win in a row up to +5% on the 5th).'],
   ];
 
@@ -450,8 +457,14 @@
       });
     }
     races.sort((a, b) => a.rnd - b.rnd);
+    const raceTotal = sum(races.map((r) => r.total));
+    const wins = races.filter((r) => r.win).length;
+    const oppRate = (bonusRates.opponent || []).length ? mean(bonusRates.opponent)
+      : (oppEval && selfEval ? oppBonusModel(oppEval, selfEval) : null);
+    const victory = wins >= VICTORY_WINS;
+    const victoryBonus = victory ? Math.round(VICTORY_BASE * (1 + (oppRate || 0))) : 0;
     return { label, filename, selfEval, oppEval, supportBonus: data.support_card_bonus ?? null, races, bonusRates,
-      total: sum(races.map((r) => r.total)), wins: races.filter((r) => r.win).length };
+      raceTotal, wins, oppRate, victory, victoryBonus, total: raceTotal + victoryBonus };
   }
 
   function scenarioDiagnostics(u, sc, idx) {
@@ -565,7 +578,7 @@
 
   // ---------------------------------------------------------------- recommendations
 
-  function makeRecommendations(umas, races, allUr, mult, skills) {
+  function makeRecommendations(umas, races, allUr, mult, skills, sessions) {
     const est = []; const notes = [];
     const nSessions = Math.max(1, new Set(races.map((r) => r.session)).size);
     const labels = {};
@@ -655,6 +668,21 @@
       }
     });
 
+    if (sessions && sessions.length) {
+      const lostM = sessions.filter((s) => !s.victory);
+      if (lostM.length) {
+        const val = mean(sessions.map((s) => VICTORY_BASE * (1 + (s.oppRate || 0)))) || 0;
+        const near = lostM.filter((s) => s.wins === VICTORY_WINS - 1).length;
+        const gain = lostM.length / sessions.length * val;
+        const firsts = [...new Set(races.map((r) => r.distType))].map((dt) => {
+          const rs = races.filter((r) => r.distType === dt);
+          return [rs.filter((r) => r.winnerSide === 'us').length / rs.length, DIST_NAMES[dt] || dt];
+        }).sort((x, y) => x[0] - y[0]);
+        const weak = firsts.slice(0, 2).map(([p, nm]) => `${nm} ${pct(p)}`).join(', ');
+        est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} final) missed in ${lostM.length}/${sessions.length} sessions, ${near} of them by a single race: worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; you take 1st least often in ${weak}.` });
+      }
+    }
+
     const missed = races.filter((r) => !r.teamIds.length);
     if (missed.length) {
       const culprits = {};
@@ -684,7 +712,7 @@
 
     const basePerSession = (sum(allUr.map((u) => u.raw)) + sum(races.map((r) => r.teamRaw))) / nSessions;
     const perK = OPP_BONUS_FIT[1] * 1000 * basePerSession;
-    notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still finish ahead of: stronger rivals also push your umas down the order.` });
+    notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still beat: stronger rivals also push your umas down the order and can cost the match victory (10,000 base).` });
 
     const l16 = allUr.filter((u) => get(u.catCount, 'lead16')).length / allUr.length;
     const l23 = allUr.filter((u) => get(u.catCount, 'lead23')).length / allUr.length;
@@ -745,7 +773,8 @@
 
     // sessions
     const sessionRows = sessions.map((s) => ({
-      label: s.label, filename: s.filename, total: s.total, wins: s.wins, n: s.races.length,
+      label: s.label, filename: s.filename, total: s.total, raceTotal: s.raceTotal, victoryBonus: s.victoryBonus,
+      wins: s.wins, n: s.races.length,
       perRace: s.total / Math.max(1, s.races.length), oppEval: s.oppEval,
       oppRate: mean(s.bonusRates.opponent || []), supRate: s.supportBonus ? s.supportBonus / 10000 : mean(s.bonusRates.support || []),
       results: s.races.map((r) => r.win),
@@ -764,11 +793,19 @@
     inc(catCnt, 'team', races.filter((r) => r.teamIds.length).length);
     inc(catHits, 'team', races.filter((r) => r.teamIds.length).length);
     unit.team = new Set(races.filter((r) => r.teamRaw).map((r) => r.teamRaw));
+    const won = sessions.filter((s) => s.victory);
+    if (won.length) {
+      inc(catRaw, 'victory', VICTORY_BASE * won.length);
+      inc(catFinal, 'victory', sum(won.map((s) => s.victoryBonus)));
+      inc(catCnt, 'victory', won.length);
+      inc(catHits, 'victory', won.length);
+      unit.victory = new Set([VICTORY_BASE]);
+    }
     const grand = sum(Object.values(catFinal));
     const categories = CATEGORY_ORDER.filter((k) => catRaw[k] || catCnt[k]).map((k) => {
       const vals = [...(unit[k] || [])].sort((x, y) => x - y);
       return { key: k, label: CATEGORY_LABELS[k], count: get(catCnt, k), hits: get(catHits, k),
-        denom: k === 'team' ? nRaces : allUr.length, raw: get(catRaw, k), final: get(catFinal, k),
+        denom: k === 'team' ? nRaces : k === 'victory' ? nSessions : allUr.length, raw: get(catRaw, k), final: get(catFinal, k),
         share: grand ? get(catFinal, k) / grand : 0, perRace: get(catFinal, k) / Math.max(1, nRaces),
         unitMin: vals[0], unitMax: vals[vals.length - 1] };
     });
@@ -862,7 +899,7 @@
       })),
     }));
 
-    const recs = makeRecommendations(umas, races, allUr, mult, skills);
+    const recs = makeRecommendations(umas, races, allUr, mult, skills, sessions);
     const unnamed = [...new Set(allUr.flatMap((u) => Object.keys(u.skillsOwned).map(Number)))].filter((s) => !skills.name(s));
 
     return {
@@ -872,6 +909,7 @@
       totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
       raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
       wins: races.filter((r) => r.win).length,
+      victories: sessions.filter((s) => s.victory).length,
       categories, grand, distances, consistent, umas: umaRows, moods, starts, lost, races: raceRows, recs,
       badChecks: races.filter((r) => !r.checkOk).length,
       missingReplay: allUr.filter((u) => u.startDelay == null).length,

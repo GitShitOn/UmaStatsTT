@@ -126,6 +126,7 @@ per uma and which umas are still short.
 
 Every event is worth **base points**. Each item is then multiplied by `1 + bonuses`, and the
 team bonus is added at the end. The script checks that the sum matches `team_total_score`.
+The session total is the sum of its 5 races plus the match victory bonus.
 The rules below were derived by matching every score event against the race replays, and
 checked on 77 sessions (385 races, 1,155 runs).
 
@@ -143,6 +144,7 @@ checked on 77 sessions (385 races, 1,155 runs).
 | Rushed | -500 when it starts, -100 for every second |
 | Outsider | 4,000 when an uma with popularity 8 or lower finishes in the top 3 |
 | Team | +4,000 if all 3 finish in the top 5, +5,000 if all 3 finish in the top 3 |
+| Match victory | +10,000 for winning 3 or more of the 5 races, on the match result screen; only the opponent bonus applies (e.g. 10,000 × 2.55 = 25,500 with a +155% opponent bonus). It is not in the files, so the session total adds it from this rule |
 
 | Percentage bonus | Value seen |
 |---|---|

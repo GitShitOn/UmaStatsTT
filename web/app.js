@@ -240,7 +240,7 @@
       <div class="tiles">
         ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}`)}
         ${tile('Average points per race', fi(A.raceAvg), `${A.nRaces} races`)}
-        ${tile('Races won', `${A.wins} of ${A.nRaces}`, pct(A.wins / A.nRaces))}
+        ${tile('Races won', `${A.wins} of ${A.nRaces}`, `${pct(A.wins / A.nRaces)} · ${A.victories} of ${A.nSessions} matches won`)}
         ${tile('1 base point is worth', `${ff(A.mult, 2)} final`, `${ff(A.mult + 0.1, 2)} for the first uma of the distance`)}
       </div>
       <div class="panel"><h3>Score by session</h3>${sessionChart(A)}</div>
@@ -263,7 +263,7 @@
     const many = ss.length > 8;
     const every = many ? Math.ceil(ss.length / 5) : 1;
     const dateOnly = (l) => shortLabel(l).replace(/, \d{2}:\d{2}$/, '');
-    const cols = ss.map((s) => `<div class="col" tabindex="0" style="--h:${((s.total / max) * 100).toFixed(2)}%" ${tipAttr(fi(s.total), `${s.label} · ${s.wins} won of ${s.n}`, `${fi(s.perRace)} per race · opponent bonus ${pct(s.oppRate, 1)}`)}>
+    const cols = ss.map((s) => `<div class="col" tabindex="0" style="--h:${((s.total / max) * 100).toFixed(2)}%" ${tipAttr(fi(s.total), `${s.label} · ${s.wins} won of ${s.n}`, `${s.victoryBonus ? `includes match victory ${fi(s.victoryBonus)} · ` : ''}opponent bonus ${pct(s.oppRate, 1)}`)}>
         ${ss.length <= 8 || s === best ? `<span class="cap${s === best ? ' keep' : ''}">${fi(s.total)}</span>` : ''}<i class="bar"></i></div>`).join('');
     const labels = ss.map((s, i) => `<div>${i % every === 0 ? `<span>${esc(many ? dateOnly(s.label) : shortLabel(s.label))}</span>` : '<span>&nbsp;</span>'}
         ${ss.length <= 12 ? `<span class="wl" aria-label="${s.wins} won, ${s.n - s.wins} lost">${s.results.map((w) => `<b class="${w ? 'w' : ''}"></b>`).join('')}</span>` : ''}</div>`).join('');
@@ -298,7 +298,7 @@
         <tbody>${rows}</tbody>
         <tfoot><tr><th class="first">Total</th><th></th><th></th><th><div class="barcell"><span class="track"></span><span class="v">${fi(A.raceAvg)}</span></div></th><th class="n">100%</th></tr></tfoot>
       </table></div>
-      <p class="note">“Present” = in how many runs (one uma in one race) the item shows up; for the team bonus, in how many races.</p>
+      <p class="note">“Present” = in how many runs (one uma in one race) the item shows up; for the team bonus, in how many races; for the match victory, in how many sessions. The match victory (3+ race wins) is not in the files: it is computed from the rule.</p>
       <div class="grid-2">
         <div class="panel"><h3>Mood</h3><div class="table-wrap"><table>
           <thead><tr><th>Mood</th><th class="n">Runs</th><th class="n">Avg place</th><th class="n">Avg base</th></tr></thead><tbody>${moods}</tbody></table></div></div>
