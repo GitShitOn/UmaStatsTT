@@ -1446,7 +1446,18 @@ def update_skill_db(path: str = SKILL_DB_FILE) -> int:
 
     db = build_skill_db(get("skillnames.json"), get("skill_data.json"))
     write_skill_db(db, path)
+    web_js = os.path.join(os.path.dirname(os.path.abspath(path)), "web", "skill_names.js")
+    if os.path.isdir(os.path.dirname(web_js)):
+        write_web_skill_db(db, web_js)
     return sum(1 for k in db if k.isdigit())
+
+
+def write_web_skill_db(db: dict, path: str) -> None:
+    """Stesso contenuto per la webapp, come script (cosi' funziona anche aprendo index.html dal disco)."""
+    body = ",\n".join(f"{json.dumps(k)}: {json.dumps(v, ensure_ascii=False)}" for k, v in db.items())
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("/* Generato da tt_stats.py --aggiorna-nomi: nomi e rarita' delle skill (Global). */\n"
+                "window.UMA_SKILLS = {\n" + body + "\n};\n")
 
 
 def write_skill_db(db: dict, path: str) -> None:

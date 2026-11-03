@@ -7,11 +7,47 @@ conviene migliorare per alzare il punteggio.
 Lo script decodifica anche il replay binario di ogni gara (`race_scenario`). Da lì ricava
 eventi di punteggio, skill attivate, HP, ritardo in partenza, rushed e sprint finale di ogni uma.
 
-## Requisiti
+Si può usare in due modi: come **webapp** nel browser, oppure come **script Python** da terminale.
+I calcoli sono gli stessi.
+
+## Webapp
+
+La cartella `web/` contiene una webapp statica, senza server e senza installazione. Trascini
+i file `TT-*.json` sulla pagina e l'analisi parte nel browser: i file non vengono inviati da
+nessuna parte. La pagina li ricorda sul dispositivo finché non premi "Svuota".
+
+- **Dal disco:** apri `web/index.html` con un doppio clic.
+- **File unico da condividere o usare offline:** `python3 web/build.py` crea
+  `dist/UmaStatsTT.html`, con stile, codice e nomi delle skill inclusi.
+- **Online:** la cartella `web/` si può pubblicare così com'è su qualsiasi hosting statico,
+  ad esempio GitHub Pages.
+
+Contenuto della pagina:
+- sintesi con i numeri chiave e le 5 azioni che valgono di più;
+- grafico del punteggio per sessione;
+- da dove arrivano i punti;
+- andamento per distanza;
+- punti di ogni uma divisi per fonte, con diagnostica e scheda (gare e skill);
+- confronto delle statistiche con gli avversari;
+- skill mai attivate;
+- dettaglio gara per gara;
+- priorità;
+- legenda;
+- esportazione CSV negli appunti.
+
+| File | Ruolo |
+|---|---|
+| `web/engine.js` | Analisi: lettura dei file, decodifica del replay, statistiche, raccomandazioni. Gira anche in Node |
+| `web/app.js` | Interfaccia: caricamento dei file, grafici, tabelle |
+| `web/index.html`, `web/style.css` | Pagina e stile (tema chiaro e scuro) |
+| `web/skill_names.js` | Nomi delle skill, generato da `tt_stats.py --aggiorna-nomi` |
+| `web/demo.js` | Dati di esempio da mostrare all'apertura (vuoto nel repository) |
+
+## Requisiti dello script
 
 Python 3.8 o superiore, nessuna libreria esterna.
 
-## Uso
+## Uso dello script
 
 ```bash
 # metti i file TT-*.json in ./data (oppure passa file/cartelle come argomenti)
@@ -34,7 +70,9 @@ I nomi (versione Global) e la rarità delle skill (bianca, oro, unica) sono in
 I dati vengono dal progetto [alpha123/uma-tools](https://github.com/alpha123/uma-tools)
 (`umalator-global/skillnames.json` e `skill_data.json`), estratti dai testi del client Global.
 
-- Quando escono skill nuove, `python3 tt_stats.py --aggiorna-nomi` scarica di nuovo il file.
+- Quando escono skill nuove, `python3 tt_stats.py --aggiorna-nomi` scarica di nuovo il file
+  e aggiorna anche `web/skill_names.js` per la webapp. Nella webapp puoi anche trascinare
+  un JSON di nomi insieme ai file delle sessioni.
   Le skill senza nome compaiono con il loro ID e il report lo segnala.
 - `--nomi-skill FILE.json` aggiunge o sostituisce dei nomi, ad esempio per tradurli. Accetta
   `{"200012": "Nome"}`, `{"200012": ["Nome", 1]}` oppure `[{"id": 200012, "name_en": "Nome"}]`.
