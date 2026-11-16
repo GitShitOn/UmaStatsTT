@@ -388,7 +388,7 @@
       }
       const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'average base points per race')}></i>`).join('');
       const rushed = u.src.rushed ? ` · rushed ${fi(u.src.rushed)}` : '';
-      html += `<div class="stack-row${u.current ? '' : ' ex'}"><div class="stack-name" title="${esc(u.label)}">${byScore ? `<span class="rank">${i + 1}</span>` : ''}${esc(u.name)}${umaTag(u)}${byScore ? ` <span class="chip small d${esc(u.mainDist)}"><i aria-hidden="true"></i>${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</span>` : ''}</div>
+      html += `<div class="stack-row${u.current ? '' : ' ex'}" data-uma="${esc(u.key)}" title="Open ${esc(u.label)}’s card"><div class="stack-name">${byScore ? `<span class="rank">${i + 1}</span>` : ''}<a href="#uma-${esc(u.key)}">${esc(u.name)}</a>${umaTag(u)}${byScore ? ` <span class="chip small d${esc(u.mainDist)}"><i aria-hidden="true"></i>${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</span>` : ''}</div>
         <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} average base points per race${rushed}`)}">${segs}</div></div>
         <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · average base points per race`, u.src.rushed ? `including rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
     });
@@ -474,7 +474,7 @@
     const list = orderedUmas(A);
     const opt = (v, l) => `<button type="button" class="seg${state.umaSort === v ? ' on' : ''}" data-action="uma-sort" data-sort="${v}" aria-pressed="${state.umaSort === v}">${l}</button>`;
     return `<section class="section" id="umas" aria-labelledby="h-umas">
-      ${sectionHead('umas', 'Umas', 'How each uma performs', 'Average base points per race, split by source. Tap a bar for details, open a card for races and skills.')}
+      ${sectionHead('umas', 'Umas', 'How each uma performs', 'Average base points per race, split by source. Hover a bar (or tap it on a phone) to see each part’s value; click a row to open that uma’s card with its races and skills.')}
       ${teamChangesPanel(A)}
       <div class="sortbar" role="group" aria-label="Order umas"><span class="small muted">Order</span>${opt('distance', 'By distance')}${opt('score', 'By average score')}</div>
       <div class="panel">${umaStack(A, list)}</div>
@@ -686,6 +686,12 @@
     if (link) {
       const card = document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
       if (card && card.tagName === 'DETAILS') card.open = true;
+    }
+    // a click on a row of the uma chart opens that uma's card
+    const row = !link && e.target.closest ? e.target.closest('.stack-row[data-uma]') : null;
+    if (row && e.pointerType !== 'touch') {
+      const card = document.getElementById(`uma-${row.dataset.uma}`);
+      if (card) { card.open = true; card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     }
     const btn = e.target.closest ? e.target.closest('[data-action]') : null;
     if (!btn) return;
