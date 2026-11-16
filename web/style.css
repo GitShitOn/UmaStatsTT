@@ -394,6 +394,19 @@ td.first, th.first { position: sticky; left: 0; background: var(--surface); z-in
 .pos.p4 { background: var(--surface-2); color: var(--ink); border-color: transparent; }
 .pos.p6 { color: var(--muted); border-style: dashed; }
 .posrow { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+table .posrow { flex-wrap: nowrap; }
+table.diag .pos { min-width: 20px; height: 20px; font-size: 0.7rem; border-radius: 5px; }
+table.diag td { padding-block: 6px; }
+.sortbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sortbar .small { margin-right: 4px; }
+.seg { font: inherit; font-size: var(--step--1); font-weight: 600; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.seg:hover { border-color: var(--ink-2); }
+.seg.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.stack-name .rank { display: inline-block; min-width: 2ch; margin-right: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (min-width: 621px) {
+  .stack-chart.by-score .stack-row, .stack-chart.by-score .axis-row { grid-template-columns: 290px minmax(0, 1fr) 7ch; }
+}
+.chip.small { font-size: 0.72rem; font-weight: 500; color: var(--ink-2); }
 .pos-more { font-size: 0.72rem; font-weight: 600; color: var(--muted); margin-right: 2px; font-variant-numeric: tabular-nums; }
 .stack-row.ex, tr.ex td, details.card.ex > summary { opacity: 0.6; }
 .changes { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; font-size: var(--step--1); }

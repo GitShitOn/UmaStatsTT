@@ -35,7 +35,8 @@ The page contains:
 - a chart of the score by session;
 - where the points come from;
 - results by distance;
-- each uma's points split by source, with diagnostics and a card (races and skills);
+- each uma's points split by source, with diagnostics and a card (races and skills), ordered
+  by distance or by average score;
 - your stats compared with your opponents';
 - skills that never fired;
 - race-by-race details;

@@ -14,7 +14,7 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
-  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false };
+  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance' };
 
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -365,19 +365,30 @@
     </section>`;
   }
 
-  function umaStack(A) {
-    const totals = A.umas.map((u) => SRC_KEYS.reduce((t, [k]) => t + Math.max(0, u.src[k] || 0), 0));
+  // Umas section order: by distance (default) or by average base points per race.
+  const SORT_KEY = 'umastats.umaSort';
+  function loadSort() { try { return localStorage.getItem(SORT_KEY) === 'score' ? 'score' : 'distance'; } catch (e) { return 'distance'; } }
+  function saveSort(v) { try { localStorage.setItem(SORT_KEY, v); } catch (e) { /* storage not available */ } }
+  function orderedUmas(A) {
+    if (state.umaSort !== 'score') return A.umas;
+    // current team first, each part from the highest average score down
+    return A.umas.slice().sort((x, y) => (x.current === y.current ? 0 : x.current ? -1 : 1) || y.avgRaw - x.avgRaw);
+  }
+
+  function umaStack(A, list) {
+    const byScore = state.umaSort === 'score';
+    const totals = list.map((u) => SRC_KEYS.reduce((t, [k]) => t + Math.max(0, u.src[k] || 0), 0));
     const { max, step } = niceScale(Math.max(...totals));
-    let html = `<div class="legend">${SRC_KEYS.map(([, l, c]) => `<span class="${c}"><i aria-hidden="true"></i>${esc(l)}</span>`).join('')}</div><div class="stack-chart">`;
+    let html = `<div class="legend">${SRC_KEYS.map(([, l, c]) => `<span class="${c}"><i aria-hidden="true"></i>${esc(l)}</span>`).join('')}</div><div class="stack-chart${byScore ? ' by-score' : ''}">`;
     let lastDist = null;
-    A.umas.forEach((u, i) => {
-      if (u.mainDist !== lastDist) {
+    list.forEach((u, i) => {
+      if (!byScore && u.mainDist !== lastDist) {
         html += `<div class="stack-group">${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</div>`;
         lastDist = u.mainDist;
       }
       const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'average base points per race')}></i>`).join('');
       const rushed = u.src.rushed ? ` · rushed ${fi(u.src.rushed)}` : '';
-      html += `<div class="stack-row${u.current ? '' : ' ex'}"><div class="stack-name" title="${esc(u.label)}">${esc(u.name)}${umaTag(u)}</div>
+      html += `<div class="stack-row${u.current ? '' : ' ex'}"><div class="stack-name" title="${esc(u.label)}">${byScore ? `<span class="rank">${i + 1}</span>` : ''}${esc(u.name)}${umaTag(u)}${byScore ? ` <span class="chip small d${esc(u.mainDist)}"><i aria-hidden="true"></i>${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</span>` : ''}</div>
         <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} average base points per race${rushed}`)}">${segs}</div></div>
         <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · average base points per race`, u.src.rushed ? `including rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
     });
@@ -388,14 +399,14 @@
     return html;
   }
 
-  function diagTable(A) {
-    const rows = A.umas.map((u) => {
+  function diagTable(A, list) {
+    const rows = list.map((u) => {
       const d = u.diag; const n = u.n;
       const uniRate = d.uniqueK / n < 0.6 ? `<span class="flag${d.uniqueK === 0 ? ' bad' : ''}">${d.uniqueK}/${n}</span>` : `${d.uniqueK}/${n}`;
       const uni = d.hasUnique ? `${uniRate}${d.uniqueLevel ? ` <span class="muted">L${d.uniqueLevel}</span>` : ''}` : '–';
       return `<tr${u.current ? '' : ' class="ex"'}>
         <td class="first">${esc(u.name)}${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
-        <td>${posRow(u.finishes)}</td>
+        <td>${posRow(u.finishes, 6)}</td>
         <td class="n">${fi(u.avgRaw)}</td>
         <td class="n">${ff(d.white, 1)}</td>
         <td class="n">${ff(d.gold, 1)}</td>
@@ -409,8 +420,8 @@
         <td class="n">${pct(d.hpEnd)}</td>
         <td class="n">${pct(d.blocked)}</td></tr>`;
     }).join('');
-    return `<div class="table-wrap"><table>
-      <thead><tr><th class="first">Uma</th><th>Finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
+    return `<div class="table-wrap"><table class="diag">
+      <thead><tr><th class="first">Uma</th><th>Last finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
       <p class="note">${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
@@ -460,14 +471,17 @@
   }
 
   function secUmas(A) {
+    const list = orderedUmas(A);
+    const opt = (v, l) => `<button type="button" class="seg${state.umaSort === v ? ' on' : ''}" data-action="uma-sort" data-sort="${v}" aria-pressed="${state.umaSort === v}">${l}</button>`;
     return `<section class="section" id="umas" aria-labelledby="h-umas">
       ${sectionHead('umas', 'Umas', 'How each uma performs', 'Average base points per race, split by source. Tap a bar for details, open a card for races and skills.')}
       ${teamChangesPanel(A)}
-      <div class="panel">${umaStack(A)}</div>
+      <div class="sortbar" role="group" aria-label="Order umas"><span class="small muted">Order</span>${opt('distance', 'By distance')}${opt('score', 'By average score')}</div>
+      <div class="panel">${umaStack(A, list)}</div>
       <div class="section-head"><h3>Diagnostics</h3></div>
-      ${diagTable(A)}
+      ${diagTable(A, list)}
       <div class="section-head"><h3>Cards</h3></div>
-      <div class="uma-list">${A.umas.map(umaCard).join('')}</div>
+      <div class="uma-list">${list.map(umaCard).join('')}</div>
     </section>`;
   }
 
@@ -676,6 +690,13 @@
     const btn = e.target.closest ? e.target.closest('[data-action]') : null;
     if (!btn) return;
     const a = btn.dataset.action;
+    if (a === 'uma-sort') {
+      state.umaSort = btn.dataset.sort === 'score' ? 'score' : 'distance';
+      saveSort(state.umaSort);
+      const sec = document.getElementById('umas');
+      if (sec && state.analysis) sec.outerHTML = secUmas(state.analysis);
+      return;
+    }
     if (a === 'clear') clearAll();
     else if (a === 'demo') showDemo();
     else if (a === 'copy-uma') copyCSV('uma');
@@ -715,6 +736,7 @@
   // ------------------------------------------------------------ start-up
 
   (async function start() {
+    state.umaSort = loadSort();
     const saved = await loadSaved();
     if (saved && saved.length) {
       state.files = saved;
