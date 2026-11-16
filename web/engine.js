@@ -972,7 +972,7 @@
     const lost = races.filter((r) => !r.win).map((r) => {
       const w = r.opponents.find((o) => o.finish === 1);
       const best = r.ours.slice().sort((x, y) => x.finish - y.finish)[0];
-      return { session: r.session, rnd: r.rnd, dist: DIST_NAMES[r.distType], distance: r.distance,
+      return { session: r.session, rnd: r.rnd, dist: DIST_NAMES[r.distType], distType: r.distType, distance: r.distance,
         winner: w ? { name: w.name, style: STYLE_NAMES[w.style] || '?', stats: w.stats } : null,
         best: best ? { name: labels[best.key] || best.name, finish: best.finish } : null };
     });

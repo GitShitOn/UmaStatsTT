@@ -9,17 +9,16 @@ uma's score events, activated skills, HP, start delay, rushed periods and final 
 
 ## Where to get the files
 
-The race files are saved by community tools that read them from the game while you play:
+The race files are saved by [**horseACT**](https://github.com/ayaliz/horseACT), a plugin for the
+[Hachimi Edge](https://github.com/kairusds/Hachimi-Edge) mod loader that reads them from the game
+while you play:
 
-- [**horseACT**](https://github.com/ayaliz/horseACT): a plugin for the
-  [Hachimi Edge](https://github.com/kairusds/Hachimi-Edge) mod loader. Put `horseACT.dll` in the
-  game folder and add it to `load_libraries` in `hachimi/config.json`. Team Trials results are
-  saved by default (`saveTTRaces` in `hachimi/horseACTConfig.json`) under
-  `Documents\Saved races`.
-- [**umadump**](https://werseter.github.io/umadump/)
-  ([source](https://github.com/werseter/umadump)).
+1. Install Hachimi Edge.
+2. Put `horseACT.dll` in the game folder and add it to `load_libraries` in `hachimi/config.json`.
+3. Team Trials results are saved by default (`saveTTRaces` in `hachimi/horseACTConfig.json`)
+   under `Documents\Saved races`.
 
-Both read the game while it runs: check their pages for setup, and use them at your own risk.
+It reads the game while it runs: check its page for setup, and use it at your own risk.
 
 ## How to use it
 

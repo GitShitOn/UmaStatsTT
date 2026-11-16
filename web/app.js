@@ -521,11 +521,42 @@
       <div class="table-wrap"><table class="heat">
         <thead><tr><th class="first">Distance</th>${E.STAT_KEYS.map(([, l]) => `<th style="text-align:center">${l}<br><span class="muted small">diff · you / opp.</span></th>`).join('')}<th class="n">Avg place<br><span class="muted small">you / opp.</span></th></tr></thead>
         <tbody>${rows}</tbody></table></div>
-      ${A.lost.length ? `<div class="section-head"><h3>Who won the races you lost</h3></div>
-      <div class="table-wrap"><table>
+      ${A.lost.length ? `<div class="section-head"><h3>Who won the races you lost</h3>
+        <p>${A.lost.length} races lost. By distance: the winners’ average stats, how close your best uma got, and who beat you most often.</p></div>
+      ${lostSummary(A)}
+      <details class="card plain"><summary><span><strong>All ${A.lost.length} lost races</strong> <span class="muted small">winner’s stats and your best uma, race by race</span></span></summary>
+        <div class="table-wrap flat"><table>
         <thead><tr><th>Race</th><th>Distance</th><th>Winner</th>${E.STAT_KEYS.map(([, l]) => `<th class="n">${l}</th>`).join('')}<th>Your best</th></tr></thead>
-        <tbody>${lost}</tbody></table></div>` : ''}
+        <tbody>${lost}</tbody></table></div></details>` : ''}
     </section>`;
+  }
+
+  // lost races grouped by distance: one row per distance instead of one per race
+  function lostSummary(A) {
+    const groups = new Map();
+    A.lost.forEach((l) => {
+      const k = l.distType;
+      if (!groups.has(k)) groups.set(k, { dt: k, name: l.dist, list: [] });
+      groups.get(k).list.push(l);
+    });
+    const ordered = [...groups.values()].sort((a, b) => b.list.length - a.list.length);
+    const rows = ordered.map((g) => {
+      const won = g.list.filter((l) => l.winner);
+      const avg = (k) => won.length ? won.reduce((t, l) => t + l.winner.stats[k], 0) / won.length : null;
+      const best = g.list.filter((l) => l.best).map((l) => l.best.finish);
+      const second = best.filter((p) => p === 2).length;
+      const counts = new Map();
+      won.forEach((l) => counts.set(l.winner.name, (counts.get(l.winner.name) || 0) + 1));
+      const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2)
+        .map(([n, c]) => `${esc(n)}${c > 1 ? ` <span class="muted">×${c}</span>` : ''}`).join(', ');
+      return `<tr><td class="first">${distChip(g.dt, g.name)}</td><td class="n">${g.list.length}</td>
+        ${E.STAT_KEYS.map(([k]) => `<td class="n">${avg(k) == null ? '–' : fi(avg(k))}</td>`).join('')}
+        <td class="n">${best.length ? ff(best.reduce((t, p) => t + p, 0) / best.length, 1) : '–'}</td>
+        <td class="n">${second}</td><td class="wrap">${top || '–'}</td></tr>`;
+    }).join('');
+    return `<div class="table-wrap"><table class="lost-sum">
+      <thead><tr><th class="first">Distance</th><th class="n">Lost</th>${E.STAT_KEYS.map(([, l]) => `<th class="n">${l}</th>`).join('')}<th class="n">Your best<br><span class="muted small">avg place</span></th><th class="n">Your best 2nd<br><span class="muted small">races</span></th><th>Winners most often</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
   }
 
   function secSkills(A) {
@@ -584,7 +615,7 @@
     return `<section class="section" id="legend" aria-labelledby="h-legend">
       ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 385 races.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
-      <p class="note">Race files: <a href="https://github.com/ayaliz/horseACT" target="_blank" rel="noopener">horseACT</a> or <a href="https://werseter.github.io/umadump/" target="_blank" rel="noopener">umadump</a>. Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
+      <p class="note">Race files: <a href="https://github.com/ayaliz/horseACT" target="_blank" rel="noopener">horseACT</a>, a Hachimi plugin. Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
     </section>`;
   }
 
