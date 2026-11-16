@@ -584,7 +584,7 @@
     return `<section class="section" id="legend" aria-labelledby="h-legend">
       ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 385 races.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
-      <p class="note">Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
+      <p class="note">Race files: <a href="https://github.com/ayaliz/horseACT" target="_blank" rel="noopener">horseACT</a> or <a href="https://werseter.github.io/umadump/" target="_blank" rel="noopener">umadump</a>. Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
     </section>`;
   }
 

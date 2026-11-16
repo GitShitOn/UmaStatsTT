@@ -276,6 +276,7 @@ a { color: inherit; }
   padding-block: 12px;
 }
 .start-copy { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.sources { margin: 0; color: var(--ink-2); font-size: var(--step--1); max-width: 62ch; }
 .start-points { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; color: var(--ink-2); max-width: 62ch; }
 .dropzone {
   display: grid;

@@ -7,6 +7,22 @@ you lose them, and what is worth improving to raise your score.
 It also decodes each race's binary replay (`race_scenario`). From the replay it gets every
 uma's score events, activated skills, HP, start delay, rushed periods and final spurt.
 
+## Where to get the files
+
+The race files are saved by community tools that read them from the game while you play:
+
+- [**horseACT**](https://github.com/ayaliz/horseACT): a plugin for the
+  [Hachimi Edge](https://github.com/kairusds/Hachimi-Edge) mod loader. Put `horseACT.dll` in the
+  game folder and add it to `load_libraries` in `hachimi/config.json`. Team Trials results are
+  saved by default (`saveTTRaces` in `hachimi/horseACTConfig.json`) under
+  `Documents\Saved races`.
+- [**umadump**](https://werseter.github.io/umadump/)
+  ([source](https://github.com/werseter/umadump)).
+
+Both read the game while it runs: check their pages for setup, and use them at your own risk.
+
+## How to use it
+
 You can use it in two ways: as a **web app** in the browser, or as a **Python script** from
 the terminal. The calculations are the same.
 

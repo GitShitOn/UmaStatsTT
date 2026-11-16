@@ -7,6 +7,10 @@ Reads the JSON files saved from Team Trials sessions (TT-YYYYMMDD_hhmmss_xxx.jso
 also decodes each race's binary replay (`race_scenario`), and prints statistics meant
 to show WHERE you lose points and WHAT is worth improving.
 
+The files are saved while you play by community tools such as horseACT
+(https://github.com/ayaliz/horseACT, a Hachimi plugin) or umadump
+(https://werseter.github.io/umadump/).
+
 Usage:
     python3 tt_stats.py                     # looks for TT-*.json in ./data and the current folder
     python3 tt_stats.py folder/ file.json ...
