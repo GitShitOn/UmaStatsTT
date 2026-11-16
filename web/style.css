@@ -47,7 +47,7 @@
   --band: #e2e9e3;
   --sec-num: #1d5b3a;
   --radius: 10px;
-  --maxw: 1140px;
+  --gutter: 16px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -118,7 +118,7 @@
 /* ------------------------------------------------------------ base */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html { scroll-padding-top: calc(76px + env(safe-area-inset-top, 0px)); }
+html { scroll-padding-top: calc(var(--topbar-h, 60px) + 16px + env(safe-area-inset-top, 0px)); }
 body {
   margin: 0;
   background: var(--bg);
@@ -167,11 +167,10 @@ a { color: inherit; }
   z-index: 20;
   background: var(--turf);
   color: var(--turf-ink);
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
 }
 .topbar-inner {
-  max-width: var(--maxw);
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -219,25 +218,21 @@ a { color: inherit; }
 .icon-btn .i-sun { display: none; }
 html.is-dark .icon-btn .i-sun { display: block; }
 html.is-dark .icon-btn .i-moon { display: none; }
-.btn.icon-btn + .btn.wide-btn, .btn.icon-btn ~ .load-btn { margin-left: 0; }
-.btn.wide-btn { flex: none; color: var(--turf-ink); border-color: color-mix(in oklab, var(--turf-ink) 35%, transparent); }
-.btn.wide-btn:hover { border-color: var(--turf-ink); background: var(--turf-2); }
-.btn.wide-btn[aria-pressed="true"] { background: var(--turf-ink); color: var(--turf); border-color: transparent; }
+.btn.icon-btn ~ .load-btn { margin-left: 0; }
 
 
-/* Full width: on large screens the page can use the whole window */
-@media (max-width: 1279px) { .btn.wide-btn { display: none; } }
-@media (min-width: 1280px) {
-  html.wide { --maxw: none; }
-  html.wide .topbar-inner { max-width: none; }
-  html.wide .page { max-width: none; padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); }
-  html.wide .topbar { padding-left: 32px; padding-right: 32px; }
-}
+/* The page uses the whole window; long text stays readable thanks to its own ch limits */
+@media (min-width: 1280px) { :root { --gutter: 32px; } }
 @media (min-width: 1700px) {
   /* two columns of uma cards, so the extra width is filled instead of stretched */
-  html.wide .uma-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
-  html.wide .tiles { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .uma-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 }
+
+/* When the section links do not fit next to the logo and the buttons, they get a row of
+   their own and wrap, so every link stays visible (set by app.js). */
+.topbar.nav-below .topbar-inner { flex-wrap: wrap; gap: 6px 12px; padding-block: 8px; }
+.topbar.nav-below .sections { order: 3; flex-basis: 100%; flex-wrap: wrap; overflow: visible; mask-image: none; gap: 2px 4px; }
 
 /* ------------------------------------------------------------ buttons */
 .btn {
@@ -262,10 +257,9 @@ html.is-dark .icon-btn .i-moon { display: none; }
 
 /* ------------------------------------------------------------ page */
 .page {
-  max-width: calc(var(--maxw) + 32px);
   margin: 0 auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--gutter), env(safe-area-inset-right, 0px));
   padding-block: 28px 64px;
   display: grid;
   gap: 28px;
@@ -283,6 +277,7 @@ html.is-dark .icon-btn .i-moon { display: none; }
 .start {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  max-width: 1200px; /* the empty page stays compact on wide screens */
   gap: 32px;
   align-items: stretch;
   padding-block: 12px;
@@ -664,8 +659,9 @@ details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto auto au
 @media (max-width: 620px) {
   h1 { font-size: 2.4rem; }
   h2 { font-size: 1.8rem; }
-  .topbar-inner { flex-wrap: wrap; gap: 8px 12px; padding-block: 8px; }
-  .sections { order: 3; flex-basis: 100%; }
+  .topbar.nav-below .topbar-inner { min-height: 0; }
+  .topbar.nav-below .sections { gap: 0 2px; }
+  .topbar.nav-below .sections a { padding: 4px 7px; }
   .brand-name { display: inline; }
   .never-item, .legend-list div { grid-template-columns: 1fr; gap: 4px; }
   .stack-row, .axis-row { grid-template-columns: minmax(0, 1fr) 7ch; }

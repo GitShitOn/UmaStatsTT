@@ -388,19 +388,19 @@
     syncTheme();
   });
 
-  // full-width layout for large screens, remembered on the device
-  const WIDE_KEY = 'umastats.wide';
-  function setWide(on) {
-    document.documentElement.classList.toggle('wide', on);
-    const b = document.getElementById('wide-btn');
-    if (b) { b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Back to the centred layout' : 'Use the whole width of the screen'; }
+  // top bar: the section links stay on the logo's row when they fit, otherwise they move
+  // to a row of their own and wrap; the bar's height is kept for scroll offsets
+  const topbar = document.querySelector('.topbar');
+  function fitTopbar() {
+    const links = document.getElementById('nav');
+    if (!topbar || !links) return;
+    topbar.classList.remove('nav-below');
+    if (!links.hidden && links.scrollWidth > links.clientWidth + 1) topbar.classList.add('nav-below');
+    document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
   }
-  try { setWide(localStorage.getItem(WIDE_KEY) === '1'); } catch (e) { /* storage not available */ }
-  document.getElementById('wide-btn')?.addEventListener('click', () => {
-    const on = !document.documentElement.classList.contains('wide');
-    setWide(on);
-    try { localStorage.setItem(WIDE_KEY, on ? '1' : '0'); } catch (e) { /* storage not available */ }
-  });
+  addEventListener('resize', fitTopbar);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTopbar); // web fonts change the links' width
+  fitTopbar();
 
   const SORT_KEY = 'umastats.umaSort';
   function loadSort() { try { return localStorage.getItem(SORT_KEY) === 'score' ? 'score' : 'distance'; } catch (e) { return 'distance'; } }
@@ -743,6 +743,7 @@
       ? [secSummary(A), secScoring(A), secDistances(A), secUmas(A), secOpponents(A), secSkills(A), secRaces(A), secPriorities(A), secLegend(A)].join('')
       : '';
     enhanceSortable($('#report'));
+    fitTopbar();
     if (typeof spy === 'function') requestAnimationFrame(spy);
   }
 

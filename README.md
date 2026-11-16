@@ -61,12 +61,12 @@ The page contains:
 - a legend;
 - CSV export to the clipboard.
 
-The moon / sun button in the top bar switches between the light and dark theme (by default
-the page follows your system setting). In "Where the points come from", the distances table and the diagnostics table, click a
-column title to sort by it (click again to reverse, a third time for the original order).
-On screens at least 1,280 px wide, the **Full width** button in the top bar lets the page use
-the whole window (on very wide screens the uma cards go in two columns). The choice is
-remembered on the device.
+- The moon / sun button in the top bar switches between the light and dark theme (by default
+  the page follows your system setting).
+- In "Where the points come from", the distances table and the diagnostics table, click a
+  column title to sort by it (click again to reverse, a third time for the original order).
+- The page uses the whole width of the window; on very wide screens the uma cards go in two
+  columns. When the section links do not fit next to the logo, they move to a row of their own.
 
 | File | Role |
 |---|---|
