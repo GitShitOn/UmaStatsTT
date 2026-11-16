@@ -368,6 +368,25 @@
   }
 
   // Umas section order: by distance (default) or by average base points per race.
+  // light / dark theme: follows the system until the button is used, then remembered
+  const THEME_KEY = 'umastats.theme';
+  const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+  function isDark() { const t = document.documentElement.dataset.theme; return t ? t === 'dark' : darkQuery.matches; }
+  function syncTheme() {
+    const dark = isDark();
+    document.documentElement.classList.toggle('is-dark', dark);
+    const b = document.getElementById('theme-btn');
+    if (b) { const l = `Switch to ${dark ? 'light' : 'dark'} theme`; b.title = l; b.setAttribute('aria-label', l); }
+  }
+  syncTheme();
+  darkQuery.addEventListener('change', syncTheme);
+  document.getElementById('theme-btn')?.addEventListener('click', () => {
+    const t = isDark() ? 'light' : 'dark';
+    document.documentElement.dataset.theme = t;
+    try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* storage not available */ }
+    syncTheme();
+  });
+
   // full-width layout for large screens, remembered on the device
   const WIDE_KEY = 'umastats.wide';
   function setWide(on) {

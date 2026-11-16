@@ -897,7 +897,7 @@
         denom: k === 'team' ? nRaces : k === 'victory' ? nSessions : allUr.length, raw: get(catRaw, k), final: get(catFinal, k),
         share: grand ? get(catFinal, k) / grand : 0, perRace: get(catFinal, k) / Math.max(1, nRaces),
         unitMin: vals[0], unitMax: vals[vals.length - 1] };
-    });
+    }).sort((a, b) => b.final - a.final); // biggest share first, penalties last
 
     // distances
     const distances = [...new Set(races.map((r) => r.distType))].sort((x, y) => x - y).map((dt) => {

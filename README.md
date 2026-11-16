@@ -61,7 +61,8 @@ The page contains:
 - a legend;
 - CSV export to the clipboard.
 
-On screens at least 1,280 px wide, the **Full width** button in the top bar lets the page use
+The moon / sun button in the top bar switches between the light and dark theme (by default
+the page follows your system setting). On screens at least 1,280 px wide, the **Full width** button in the top bar lets the page use
 the whole window (on very wide screens the uma cards go in two columns). The choice is
 remembered on the device.
 
@@ -114,7 +115,7 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 | Summary | Data reliability, the uma to retrain first, the 5 actions worth the most (estimated final points per session), warnings (aptitudes below A, slot 1 on the wrong uma) |
 | Sessions | Score, wins and losses, opponent rating and multipliers for each session |
 | How the score is built | Percentage bonuses seen and how much 1 base point is worth |
-| Where the points come from | Weight of each category (finishing position, skills, start, ...) in the total |
+| Where the points come from | Weight of each category (finishing position, skills, start, ...) in the total, biggest first |
 | By distance | Points, wins, average place and team bonus for Sprint, Mile, Medium, Long and Dirt |
 | Performance by uma | Finishes, base and final points per race, split by source |
 | Diagnostics by uma | Skills per race, unique activations, perfect starts, "leads own strategy", rushed, out of HP, late spurt, HP left, time blocked |

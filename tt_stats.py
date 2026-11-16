@@ -1196,7 +1196,8 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     cat_hits["victory"] += len(won)
     grand = sum(cat_final.values())
     rows = []
-    for ck in CATEGORY_ORDER:
+    # biggest share first, penalties last
+    for ck in sorted(CATEGORY_ORDER, key=lambda k: -cat_final.get(k, 0)):
         if not cat_raw.get(ck) and not cat_cnt.get(ck):
             continue
         denom = n_races if ck == "team" else len(sessions) if ck == "victory" else len(all_ur)

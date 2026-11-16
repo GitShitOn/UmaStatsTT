@@ -214,14 +214,19 @@ a { color: inherit; }
 .sections a:hover { background: var(--turf-2); opacity: 1; }
 .sections a[aria-current="true"] { background: var(--turf-ink); color: var(--turf); opacity: 1; }
 .load-btn { margin-left: auto; flex: none; }
+.btn.icon-btn { flex: none; padding: 8px; color: var(--turf-ink); border-color: color-mix(in oklab, var(--turf-ink) 35%, transparent); margin-left: auto; }
+.btn.icon-btn:hover { border-color: var(--turf-ink); background: var(--turf-2); }
+.icon-btn .i-sun { display: none; }
+html.is-dark .icon-btn .i-sun { display: block; }
+html.is-dark .icon-btn .i-moon { display: none; }
+.btn.icon-btn + .btn.wide-btn, .btn.icon-btn ~ .load-btn { margin-left: 0; }
 .btn.wide-btn { flex: none; color: var(--turf-ink); border-color: color-mix(in oklab, var(--turf-ink) 35%, transparent); }
 .btn.wide-btn:hover { border-color: var(--turf-ink); background: var(--turf-2); }
 .btn.wide-btn[aria-pressed="true"] { background: var(--turf-ink); color: var(--turf); border-color: transparent; }
-.btn.wide-btn { margin-left: auto; }
+
 
 /* Full width: on large screens the page can use the whole window */
 @media (max-width: 1279px) { .btn.wide-btn { display: none; } }
-@media (min-width: 1280px) { .btn.wide-btn + .load-btn { margin-left: 0; } }
 @media (min-width: 1280px) {
   html.wide { --maxw: none; }
   html.wide .topbar-inner { max-width: none; }
