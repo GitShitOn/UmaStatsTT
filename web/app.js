@@ -15,7 +15,8 @@
 
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
   const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance',
-    raceView: { show: 'all', dist: 'all', uma: 'all', shown: 10 } };
+    raceView: { show: 'all', dist: 'all', uma: 'all', shown: 10 },
+    tableSort: {} };
   const RACE_PAGE = 10;
 
   const $ = (sel) => document.querySelector(sel);
@@ -315,8 +316,8 @@
     const unit = (c) => (c.unitMin == null ? '–' : c.unitMin === c.unitMax ? fi(c.unitMin) : `${fi(c.unitMin)} … ${fi(c.unitMax)}`);
     const rows = A.categories.map((c) => `<tr>
         <td class="first">${esc(c.label)}</td>
-        <td class="n">${unit(c)}</td>
-        <td class="n">${c.hits}/${c.denom}</td>
+        <td class="n" data-sort="${c.unitMax == null ? '' : c.unitMax}">${unit(c)}</td>
+        <td class="n" data-sort="${c.denom ? c.hits / c.denom : 0}">${c.hits}/${c.denom}</td>
         <td><div class="barcell"><div class="track">${c.perRace > 0 ? `<i style="width:${((c.perRace / maxPR) * 100).toFixed(2)}%" ${tipAttr(fi(c.perRace), c.label, `${pct(c.share, 1)} of the total`)}></i>` : ''}</div><span class="v">${fi(c.perRace)}</span></div></td>
         <td class="n">${pct(c.share, 1)}</td></tr>`).join('');
     const bonus = A.bonuses.map((b) => {
@@ -330,7 +331,7 @@
       <div class="panel"><h3>Percentage bonuses seen</h3><div class="kv">${bonus}</div>
         <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} final points.</p>
         <p class="note" style="margin-top:8px">Opponent bonus = ${pct(A.oppFormula.a, 2)} + ${pct(A.oppFormula.perK, 2)} per 1,000 opponent rating − ${pct(-A.oppFormula.selfPerK, 2)} per 1,000 of your own rating${A.oppFormula.maxErr != null ? `; on your sessions it is off by at most ${pct(A.oppFormula.maxErr, 2)}` : ''}. A stronger opponent raises the multiplier.</p></div>
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="sortable" id="tbl-sources">
         <thead><tr><th class="first">Item</th><th class="n">Base points per event</th><th class="n">Present</th><th>Final points per race</th><th class="n">Share</th></tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr><th class="first">Total</th><th></th><th></th><th><div class="barcell"><span class="track"></span><span class="v">${fi(A.raceAvg)}</span></div></th><th class="n">100%</th></tr></tfoot>
@@ -347,10 +348,10 @@
   function secDistances(A) {
     const maxT = Math.max(1, ...A.distances.map((d) => d.avgTotal || 0));
     const rows = A.distances.map((d) => `<tr>
-      <td class="first">${distChip(d.dt, d.name)}</td>
-      <td>${d.courses.map((c) => `${fi(c)} m`).join(', ') || '–'}</td>
+      <td class="first" data-sort="${esc(d.dt)}">${distChip(d.dt, d.name)}</td>
+      <td data-sort="${d.courses.length ? d.courses[0] : ''}">${d.courses.map((c) => `${fi(c)} m`).join(', ') || '–'}</td>
       <td class="n">${d.races}</td>
-      <td class="n">${d.wins}-${d.races - d.wins}</td>
+      <td class="n" data-sort="${d.races ? d.wins / d.races : 0}">${d.wins}-${d.races - d.wins}</td>
       <td><div class="barcell"><div class="track"><i class="d${d.dt}" style="width:${((d.avgTotal / maxT) * 100).toFixed(2)}%;background:var(--c)" ${tipAttr(fi(d.avgTotal), `${d.name} · average points per race`, `${d.wins} won of ${d.races}`)}></i></div><span class="v">${fi(d.avgTotal)}</span></div></td>
       <td class="n">${ff(d.avgFinish, 1)}</td>
       <td class="n">${d.teamBonus}/${d.races}</td>
@@ -360,7 +361,7 @@
       : `The race went to the team with the 1st-place uma in ${A.consistent} of ${A.nRaces} races.`;
     return `<section class="section" id="distances" aria-labelledby="h-distances">
       ${sectionHead('distances', 'Distances', 'How you do in each category')}
-      <div class="table-wrap"><table>
+      <div class="table-wrap"><table class="sortable" id="tbl-dist">
         <thead><tr><th class="first">Distance</th><th>Courses</th><th class="n">Races</th><th class="n">W-L</th><th>Average points per race</th><th class="n">Avg place</th><th class="n">Team bonus</th><th class="n">Our 1st place</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
       <p class="note">${esc(cons)}</p>
@@ -441,7 +442,7 @@
       const uni = d.hasUnique ? `${uniRate}${d.uniqueLevel ? ` <span class="muted">L${d.uniqueLevel}</span>` : ''}` : '–';
       return `<tr${u.current ? '' : ' class="ex"'} data-uma="${esc(u.key)}" title="Open ${esc(u.label)}’s card">
         <td class="first"><a href="#uma-${esc(u.key)}">${esc(u.name)}</a>${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
-        <td>${posRow(u.finishes, 6)}</td>
+        <td data-sort="${u.avgFinish != null ? -u.avgFinish : ''}" title="average place ${u.avgFinish != null ? ff(u.avgFinish, 1) : '–'}">${posRow(u.finishes, 6)}</td>
         <td class="n">${fi(u.avgRaw)}</td>
         <td class="n">${ff(d.white, 1)}</td>
         <td class="n">${ff(d.gold, 1)}</td>
@@ -455,10 +456,10 @@
         <td class="n">${pct(d.hpEnd)}</td>
         <td class="n">${pct(d.blocked)}</td></tr>`;
     }).join('');
-    return `<div class="table-wrap"><table class="diag">
-      <thead><tr><th class="first">Uma</th><th>Last finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
+    return `<div class="table-wrap"><table class="diag sortable" id="tbl-diag">
+      <thead><tr><th class="first">Uma</th><th title="sorts by average place">Last finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <p class="note">Click a row to open that uma’s card. ${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
+      <p class="note">Click a row to open that uma’s card, or a column title to sort by it. ${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
 
   function umaCard(u) {
@@ -741,6 +742,7 @@
     $('#report').innerHTML = A
       ? [secSummary(A), secScoring(A), secDistances(A), secUmas(A), secOpponents(A), secSkills(A), secRaces(A), secPriorities(A), secLegend(A)].join('')
       : '';
+    enhanceSortable($('#report'));
     if (typeof spy === 'function') requestAnimationFrame(spy);
   }
 
@@ -803,7 +805,77 @@
     }
   }
 
+  // ------------------------------------------------------------ sortable tables
+  // Tables with class "sortable": a click on a column title cycles through
+  // descending (ascending for text) → the other way → the original order.
+  // A cell's data-sort, when present, is the value used for sorting.
+
+  function cellKey(td) {
+    const raw = td.dataset.sort != null ? td.dataset.sort : td.textContent;
+    const t = raw.replace(/\u2212/g, '-').replace(/,/g, '').trim();
+    const ratio = /^(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/.exec(t);
+    if (ratio) return Number(ratio[2]) ? Number(ratio[1]) / Number(ratio[2]) : 0;
+    const m = /-?\d+(?:\.\d+)?/.exec(t);
+    return m && td.dataset.sort != null ? Number(m[0]) : m && /^[-+~]?\d/.test(t) ? Number(m[0]) : t.toLowerCase();
+  }
+
+  function sortTable(table, col, dir) {
+    const body = table.tBodies[0];
+    const rows = [...body.rows];
+    if (!dir) rows.sort((a, b) => a.dataset.i - b.dataset.i);
+    else {
+      const keyed = rows.map((r) => ({ r, k: r.cells[col] ? cellKey(r.cells[col]) : '' }));
+      const num = (k) => typeof k === 'number';
+      keyed.sort((a, b) => {
+        const an = num(a.k); const bn = num(b.k);
+        if (an && bn) return dir === 'asc' ? a.k - b.k : b.k - a.k;
+        if (an !== bn) return an ? -1 : 1; // blanks and dashes always last
+        return dir === 'asc' ? String(a.k).localeCompare(String(b.k)) : String(b.k).localeCompare(String(a.k));
+      });
+      keyed.forEach((x, i) => { rows[i] = x.r; });
+    }
+    body.append(...rows);
+    [...table.tHead.rows[0].cells].forEach((th, i) => {
+      if (i === col && dir) th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
+      else th.removeAttribute('aria-sort');
+    });
+  }
+
+  function enhanceSortable(root) {
+    root.querySelectorAll('table.sortable').forEach((t) => {
+      if (t.dataset.enhanced) return;
+      t.dataset.enhanced = '1';
+      [...t.tBodies[0].rows].forEach((r, i) => { r.dataset.i = i; });
+      [...t.tHead.rows[0].cells].forEach((th, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'th-sort';
+        b.dataset.col = i;
+        b.append(...th.childNodes);
+        th.append(b);
+      });
+      const saved = state.tableSort[t.id];
+      if (saved) sortTable(t, saved.col, saved.dir);
+    });
+  }
+
+  function onSortClick(btn) {
+    const table = btn.closest('table');
+    const col = Number(btn.dataset.col);
+    const cur = state.tableSort[table.id];
+    const keys = [...table.tBodies[0].rows].map((r) => (r.cells[col] ? cellKey(r.cells[col]) : ''));
+    const first = keys.some((k) => typeof k === 'number') ? 'desc' : 'asc';
+    let dir;
+    if (!cur || cur.col !== col) dir = first;
+    else if (cur.dir === first) dir = first === 'desc' ? 'asc' : 'desc';
+    else dir = null;
+    if (dir) state.tableSort[table.id] = { col, dir }; else delete state.tableSort[table.id];
+    sortTable(table, col, dir);
+  }
+
   document.addEventListener('click', (e) => {
+    const sortBtn = e.target.closest ? e.target.closest('.th-sort') : null;
+    if (sortBtn) { onSortClick(sortBtn); return; }
     // links to an uma's card open it, since the cards start collapsed
     const link = e.target.closest ? e.target.closest('a[href^="#uma-"]') : null;
     if (link) {
@@ -823,8 +895,9 @@
     if (a === 'uma-sort') {
       state.umaSort = btn.dataset.sort === 'score' ? 'score' : 'distance';
       saveSort(state.umaSort);
+      delete state.tableSort['tbl-diag']; // the Order switch also orders the diagnostics table
       const sec = document.getElementById('umas');
-      if (sec && state.analysis) sec.outerHTML = secUmas(state.analysis);
+      if (sec && state.analysis) { sec.outerHTML = secUmas(state.analysis); enhanceSortable(document.getElementById('umas')); }
       return;
     }
     if (a.startsWith('race-')) {

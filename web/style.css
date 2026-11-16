@@ -430,6 +430,16 @@ th { font-weight: 600; color: var(--ink-2); background: var(--surface); position
 thead th { border-bottom: 1px solid var(--line); }
 tbody tr:last-child td { border-bottom: 0; }
 th.n, td.n { text-align: right; }
+/* sortable column titles */
+.th-sort { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; border-radius: 4px; }
+.th-sort > br { display: none; }
+th.n .th-sort { flex-direction: row-reverse; }
+.th-sort::after { content: "↕"; font-size: 0.8em; opacity: 0.35; }
+.th-sort:hover::after { opacity: 0.8; }
+th[aria-sort="descending"] .th-sort::after { content: "↓"; opacity: 1; color: var(--accent); }
+th[aria-sort="ascending"] .th-sort::after { content: "↑"; opacity: 1; color: var(--accent); }
+th[aria-sort] { color: var(--ink); }
+.th-sort:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 td.wrap { white-space: normal; min-width: 16ch; }
 tr.sub td { color: var(--muted); }
 td.first, th.first { position: sticky; left: 0; background: var(--surface); z-index: 1; }
