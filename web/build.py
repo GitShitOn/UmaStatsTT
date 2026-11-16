@@ -8,6 +8,7 @@ Usage:
     python3 web/build.py --fragment            # without <html>/<head>/<body>, for hosts that add them
 """
 import argparse
+import base64
 import os
 import re
 
@@ -31,6 +32,11 @@ def build(demo_js=None, fragment=False):
         return "<script>\n" + code + "\n</script>"
 
     html = re.sub(r'<script src="([\w.]+\.js)"></script>', inline, html)
+    # the icon goes in as a data URL; the PNG versions are only for the hosted site
+    svg = read(os.path.join(HERE, "favicon.svg"))
+    icon = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    html = html.replace('href="favicon.svg"', f'href="{icon}"')
+    html = re.sub(r'<link rel="(?:icon|apple-touch-icon)" href="[\w.-]+\.png"[^>]*>\s*', "", html)
     if fragment:
         for pat in (r"<!doctype html>\s*", r"<html[^>]*>\s*", r"</?head>\s*", r"</?body>\s*", r"</html>\s*",
                     r'<meta charset="utf-8">\s*', r'<meta name="viewport"[^>]*>\s*'):
