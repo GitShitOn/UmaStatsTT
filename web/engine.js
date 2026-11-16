@@ -1019,7 +1019,7 @@
     if (get(u.catCount, 'time')) notes.push({ t: 'time bonus', s: 'good' });
     return {
       session: u.session, rnd: u.rnd, dist: DIST_NAMES[u.distType] || String(u.distType), distance: u.distance,
-      slot: u.slot, finish: u.finish, popularity: u.popularity, mood: MOOD_NAMES[u.mood] || '?', raw: u.raw, final: u.final,
+      key: u.key, slot: u.slot, finish: u.finish, popularity: u.popularity, mood: MOOD_NAMES[u.mood] || '?', raw: u.raw, final: u.final,
       white: get(u.catCount, 'white'), gold: get(u.catCount, 'gold'), unique: get(u.catCount, 'unique'), notes,
     };
   }

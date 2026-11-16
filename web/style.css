@@ -532,6 +532,23 @@ table.lost-sum td.wrap { min-width: 18ch; }
 
 /* races */
 .session-block { display: grid; gap: 8px; }
+.race-filters { display: grid; gap: 10px; }
+.race-selects { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.race-selects label { display: inline-flex; align-items: center; gap: 6px; }
+.select { font: inherit; font-size: var(--step--1); color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; max-width: 60vw; }
+.race-list { display: grid; gap: 6px; }
+.race-count { margin: 0; }
+.race-more { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; padding-top: 6px; }
+details.card.sess > summary { grid-template-columns: 12ch auto minmax(0, 1fr) auto auto auto; padding-block: 8px; }
+.sess-date { font-family: var(--font-mono); font-size: var(--step--1); }
+.sess-wins { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.sess-opp { font-variant-numeric: tabular-nums; }
+details.card.sess .card-body { gap: 6px; }
+.rsq-row { display: inline-flex; gap: 4px; }
+.rsq { width: 24px; height: 24px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 0.72rem; font-weight: 700; font-variant-numeric: tabular-nums;
+  border: 2px solid var(--c); color: var(--ink); background: var(--surface); }
+.rsq.win { background: var(--c); color: #fff; }
+.rsq.dim { opacity: 0.3; }
 .session-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
 .session-head h3 { font-family: var(--font-mono); font-weight: 500; font-size: var(--step-0); }
 details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
@@ -610,6 +627,18 @@ details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto auto au
   details.card > summary::after { grid-row: 1; grid-column: 2; }
   details.card > summary .card-score { grid-column: 1 / -1; text-align: left; }
   details.race > summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  /* two lines: date and opponent bonus; squares, result and score */
+  details.card.sess > summary { grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 6px 10px; }
+  details.card.sess .sess-date { grid-column: 1; grid-row: 1; }
+  details.card.sess .sess-opp { grid-column: 2 / 4; grid-row: 1; }
+  details.card.sess > summary::after { grid-column: 4; grid-row: 1; justify-self: end; }
+  details.card.sess .rsq-row { grid-column: 1; grid-row: 2; }
+  details.card.sess .sess-wins { grid-column: 2; grid-row: 2; }
+  details.card.sess .card-score { grid-column: 3 / 5; grid-row: 2; text-align: right; }
+  details.card.sess .card-score { font-size: var(--step--1); }
+  .sess .card-score .unit { display: none; }
+  .rsq { width: 22px; height: 22px; }
+  details.card.sess .card-body { padding: 8px; }
   details.race > summary .posrow { grid-column: 1 / 3; grid-row: 2; }
   details.race > summary .card-score { grid-column: 3; grid-row: 2; text-align: right; }
   details.race > summary::after { grid-column: 3; grid-row: 1; }

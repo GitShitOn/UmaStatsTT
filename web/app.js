@@ -14,7 +14,9 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
-  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance' };
+  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance',
+    raceView: { show: 'all', dist: 'all', uma: 'all', shown: 10 } };
+  const RACE_PAGE = 10;
 
   const $ = (sel) => document.querySelector(sel);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -569,27 +571,83 @@
     </section>`;
   }
 
-  function secRaces(A) {
-    const blocks = A.races.map((s) => {
-      const wins = s.races.filter((r) => r.win).length;
-      const total = s.races.reduce((t, r) => t + r.total, 0);
-      const races = s.races.map((r) => {
-        const rows = r.ours.map((u) => `<tr><td class="first">${esc(u.name)}</td><td class="n">${u.slot === 1 ? '<span class="tag">1st</span>' : u.slot}</td><td>${posBadge(u.finish)}</td><td class="n">${u.popularity}</td><td>${esc(u.mood)}</td><td class="n">${fi(u.raw)}</td><td class="n">${fi(u.final)}</td><td class="n">${u.white}/${u.gold}/${u.unique}</td><td class="wrap">${noteFlags(u.notes)}</td></tr>`).join('')
-          + r.opponents.map((o) => `<tr class="sub"><td class="first">opp. ${esc(o.name)}</td><td class="n">${o.slot}</td><td>${posBadge(o.finish)}</td><td></td><td></td><td></td><td></td><td></td><td>${esc(o.style)}</td></tr>`).join('');
-        return `<details class="card race"><summary>
-            <span class="result${r.win ? ' win' : ''}">${r.win ? 'Won' : 'Lost'}</span>
-            <span class="card-title"><strong>R${r.rnd} · ${esc(r.dist)} ${r.distance ? `${fi(r.distance)} m` : ''}</strong><span>${esc(r.weather)}, ${esc(r.ground)}${r.teamFinal ? ` · team bonus ${fi(r.teamFinal)}` : ''}</span></span>
-            ${posRow(r.ours.map((u) => u.finish))}
-            <span class="card-score"><b>${fi(r.total)}</b>points</span>
-          </summary><div class="card-body"><div class="table-wrap"><table>
-            <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
-            <tbody>${rows}</tbody></table></div></div></details>`;
-      }).join('');
-      return `<div class="session-block"><div class="session-head"><h3>${esc(s.label)}</h3><span class="muted">${fi(total)} points · ${wins} won of ${s.races.length}</span></div>${races}</div>`;
+  // ------------------------------------------------------------ race by race
+  // One row per session (newest first, 10 at a time); a row opens its races.
+  // Filters: result (won / lost races, or matches lost by one race), distance, uma.
+
+  function raceMatches(r, v) {
+    if (v.show === 'won' && !r.win) return false;
+    if (v.show === 'lost' && r.win) return false;
+    if (v.dist !== 'all' && String(r.distType) !== v.dist) return false;
+    if (v.uma !== 'all' && !r.ours.some((u) => String(u.key) === v.uma)) return false;
+    return true;
+  }
+
+  function raceCard(r) {
+    const rows = r.ours.map((u) => `<tr><td class="first">${esc(u.name)}</td><td class="n">${u.slot === 1 ? '<span class="tag">1st</span>' : u.slot}</td><td>${posBadge(u.finish)}</td><td class="n">${u.popularity}</td><td>${esc(u.mood)}</td><td class="n">${fi(u.raw)}</td><td class="n">${fi(u.final)}</td><td class="n">${u.white}/${u.gold}/${u.unique}</td><td class="wrap">${noteFlags(u.notes)}</td></tr>`).join('')
+      + r.opponents.map((o) => `<tr class="sub"><td class="first">opp. ${esc(o.name)}</td><td class="n">${o.slot}</td><td>${posBadge(o.finish)}</td><td></td><td></td><td></td><td></td><td></td><td>${esc(o.style)}</td></tr>`).join('');
+    return `<details class="card race"><summary>
+        <span class="result${r.win ? ' win' : ''}">${r.win ? 'Won' : 'Lost'}</span>
+        <span class="card-title"><strong>R${r.rnd} · ${esc(r.dist)} ${r.distance ? `${fi(r.distance)} m` : ''}</strong><span>${esc(r.weather)}, ${esc(r.ground)}${r.teamFinal ? ` · team bonus ${fi(r.teamFinal)}` : ''}</span></span>
+        ${posRow(r.ours.map((u) => u.finish))}
+        <span class="card-score"><b>${fi(r.total)}</b>points</span>
+      </summary><div class="card-body"><div class="table-wrap"><table>
+        <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div></details>`;
+  }
+
+  function raceSquares(s, v) {
+    return `<span class="rsq-row">${s.races.map((r) => {
+      const best = Math.min(...r.ours.map((u) => u.finish));
+      const hit = raceMatches(r, v);
+      return `<span class="rsq d${esc(r.distType)}${r.win ? ' win' : ''}${hit ? '' : ' dim'}" ${tipAttr(r.win ? 'Won' : 'Lost', `R${r.rnd} · ${r.dist}${r.distance ? ` ${fi(r.distance)} m` : ''}`, `your best ${ordinal(best)} · ${fi(r.total)} points`)}>${best}</span>`;
+    }).join('')}</span>`;
+  }
+
+  function raceList(A) {
+    const v = state.raceView;
+    const all = A.races.map((s, i) => ({ s, info: A.sessions[i] })).reverse();
+    const list = all.filter(({ s, info }) => (v.show !== 'close' || info.wins === 2) && s.races.some((r) => raceMatches(r, v)));
+    const shown = list.slice(0, v.shown);
+    const filtered = v.show !== 'all' || v.dist !== 'all' || v.uma !== 'all';
+    const rows = shown.map(({ s, info }) => {
+      const races = s.races.filter((r) => raceMatches(r, v));
+      return `<details class="card sess"><summary>
+          <span class="sess-date">${esc(shortLabel(s.label))}</span>
+          ${raceSquares(s, v)}
+          <span class="sess-wins"><span class="result${info.victoryBonus ? ' win' : ''}" title="${info.victoryBonus ? 'match won' : 'match lost'}">${info.wins}/${info.n} ${info.victoryBonus ? 'won' : 'lost'}</span></span>
+          <span class="sess-opp muted small">opp. ${info.oppRate != null ? `+${pct(info.oppRate, 0)}` : '–'}</span>
+          <span class="card-score"><b>${fi(info.total)}</b><span class="unit">points</span></span>
+        </summary><div class="card-body">${races.map(raceCard).join('')}${races.length < s.races.length ? `<p class="note">${s.races.length - races.length} of the ${s.races.length} races hidden by the filters.</p>` : ''}</div></details>`;
     }).join('');
+    const left = list.length - shown.length;
+    return `<div class="race-list" id="race-list">
+      <p class="small muted race-count" role="status">${list.length ? `Showing ${shown.length} of ${list.length} sessions${filtered ? ` that match (${all.length} in all)` : ''}, newest first.` : 'No session matches these filters.'}</p>
+      ${rows}
+      ${left > 0 ? `<div class="race-more"><button class="btn" type="button" data-action="race-more">Show ${Math.min(RACE_PAGE, left)} more</button><button class="btn btn-ghost" type="button" data-action="race-all">Show all ${list.length}</button></div>` : ''}
+    </div>`;
+  }
+
+  function raceFilters(A) {
+    const v = state.raceView;
+    const seg = (val, label) => `<button type="button" class="seg${v.show === val ? ' on' : ''}" data-action="race-show" data-v="${val}" aria-pressed="${v.show === val}">${label}</button>`;
+    const dists = [...new Map(A.races.flatMap((s) => s.races).map((r) => [String(r.distType), r.dist])).entries()].sort((a, b) => a[0] - b[0]);
+    const umas = A.umas.slice().sort((a, b) => (b.current - a.current) || a.label.localeCompare(b.label));
+    return `<div class="race-filters">
+      <div class="sortbar" role="group" aria-label="Show"><span class="small muted">Show</span>${seg('all', 'All')}${seg('won', 'Won races')}${seg('lost', 'Lost races')}${seg('close', 'Matches lost by one race')}</div>
+      <div class="race-selects">
+        <label class="small muted">Distance <select class="select" data-race-filter="dist"><option value="all">All</option>${dists.map(([k, n]) => `<option value="${esc(k)}"${v.dist === k ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select></label>
+        <label class="small muted">Uma <select class="select" data-race-filter="uma"><option value="all">All</option>${umas.map((u) => `<option value="${esc(u.key)}"${v.uma === String(u.key) ? ' selected' : ''}>${esc(u.label)}${u.current ? '' : ' (former)'}</option>`).join('')}</select></label>
+        ${v.show !== 'all' || v.dist !== 'all' || v.uma !== 'all' ? '<button class="btn btn-ghost" type="button" data-action="race-reset">Clear filters</button>' : ''}
+      </div>
+    </div>`;
+  }
+
+  function secRaces(A) {
     return `<section class="section" id="races" aria-labelledby="h-races">
-      ${sectionHead('races', 'Races', 'Race by race')}
-      ${blocks}
+      ${sectionHead('races', 'Races', 'Race by race', 'One row per session: the squares are its 5 races (colour = distance, filled = won, number = your best place), then races won and the match result. Click a row to see its races.')}
+      ${raceFilters(A)}
+      ${raceList(A)}
       <div class="panel"><h3>Export to a spreadsheet</h3>
         <p class="note">Copy the data as CSV and paste it into Excel, Numbers or Google Sheets.</p>
         <div class="export" style="margin-top:10px">
@@ -749,6 +807,15 @@
       if (sec && state.analysis) sec.outerHTML = secUmas(state.analysis);
       return;
     }
+    if (a.startsWith('race-')) {
+      const v = state.raceView;
+      if (a === 'race-show') { v.show = btn.dataset.v; v.shown = RACE_PAGE; }
+      else if (a === 'race-reset') Object.assign(v, { show: 'all', dist: 'all', uma: 'all', shown: RACE_PAGE });
+      else if (a === 'race-more') v.shown += RACE_PAGE;
+      else if (a === 'race-all') v.shown = Infinity;
+      rerenderRaces(a === 'race-more' || a === 'race-all');
+      return;
+    }
     if (a === 'clear') clearAll();
     else if (a === 'demo') showDemo();
     else if (a === 'copy-uma') copyCSV('uma');
@@ -756,6 +823,22 @@
   });
 
   const input = $('#file-input');
+  // re-render only the race list (and the filters, unless only the page grew)
+  function rerenderRaces(listOnly) {
+    const A = state.analysis; if (!A) return;
+    if (listOnly) { const l = document.getElementById('race-list'); if (l) l.outerHTML = raceList(A); return; }
+    const sec = document.getElementById('races'); if (sec) sec.outerHTML = secRaces(A);
+  }
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest && e.target.closest('[data-race-filter]');
+    if (!sel) return;
+    state.raceView[sel.dataset.raceFilter] = sel.value;
+    state.raceView.shown = RACE_PAGE;
+    rerenderRaces(false);
+    const again = document.querySelector(`[data-race-filter="${sel.dataset.raceFilter}"]`);
+    if (again) again.focus();
+  });
+
   input.addEventListener('change', () => {
     const files = [...input.files];
     input.value = '';

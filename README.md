@@ -55,7 +55,8 @@ The page contains:
   opens its card;
 - your stats compared with your opponents';
 - skills that never fired;
-- race-by-race details;
+- race by race: one row per session (newest first, 10 at a time) that opens its races, with
+  filters for won or lost races, matches lost by one race, distance and uma;
 - priorities;
 - a legend;
 - CSV export to the clipboard.
