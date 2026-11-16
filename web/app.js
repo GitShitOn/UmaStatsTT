@@ -366,6 +366,20 @@
   }
 
   // Umas section order: by distance (default) or by average base points per race.
+  // full-width layout for large screens, remembered on the device
+  const WIDE_KEY = 'umastats.wide';
+  function setWide(on) {
+    document.documentElement.classList.toggle('wide', on);
+    const b = document.getElementById('wide-btn');
+    if (b) { b.setAttribute('aria-pressed', String(on)); b.title = on ? 'Back to the centred layout' : 'Use the whole width of the screen'; }
+  }
+  try { setWide(localStorage.getItem(WIDE_KEY) === '1'); } catch (e) { /* storage not available */ }
+  document.getElementById('wide-btn')?.addEventListener('click', () => {
+    const on = !document.documentElement.classList.contains('wide');
+    setWide(on);
+    try { localStorage.setItem(WIDE_KEY, on ? '1' : '0'); } catch (e) { /* storage not available */ }
+  });
+
   const SORT_KEY = 'umastats.umaSort';
   function loadSort() { try { return localStorage.getItem(SORT_KEY) === 'score' ? 'score' : 'distance'; } catch (e) { return 'distance'; } }
   function saveSort(v) { try { localStorage.setItem(SORT_KEY, v); } catch (e) { /* storage not available */ } }
@@ -404,8 +418,8 @@
       const d = u.diag; const n = u.n;
       const uniRate = d.uniqueK / n < 0.6 ? `<span class="flag${d.uniqueK === 0 ? ' bad' : ''}">${d.uniqueK}/${n}</span>` : `${d.uniqueK}/${n}`;
       const uni = d.hasUnique ? `${uniRate}${d.uniqueLevel ? ` <span class="muted">L${d.uniqueLevel}</span>` : ''}` : '–';
-      return `<tr${u.current ? '' : ' class="ex"'}>
-        <td class="first">${esc(u.name)}${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
+      return `<tr${u.current ? '' : ' class="ex"'} data-uma="${esc(u.key)}" title="Open ${esc(u.label)}’s card">
+        <td class="first"><a href="#uma-${esc(u.key)}">${esc(u.name)}</a>${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
         <td>${posRow(u.finishes, 6)}</td>
         <td class="n">${fi(u.avgRaw)}</td>
         <td class="n">${ff(d.white, 1)}</td>
@@ -423,7 +437,7 @@
     return `<div class="table-wrap"><table class="diag">
       <thead><tr><th class="first">Uma</th><th>Last finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
-      <p class="note">${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
+      <p class="note">Click a row to open that uma’s card. ${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
 
   function umaCard(u) {
@@ -687,9 +701,10 @@
       const card = document.getElementById(decodeURIComponent(link.getAttribute('href').slice(1)));
       if (card && card.tagName === 'DETAILS') card.open = true;
     }
-    // a click on a row of the uma chart opens that uma's card
-    const row = !link && e.target.closest ? e.target.closest('.stack-row[data-uma]') : null;
-    if (row && e.pointerType !== 'touch') {
+    // a click on a row of the uma chart or of the diagnostics table opens that uma's card
+    // (on a phone a tap on a chart bar shows its tooltip instead)
+    const row = !link && e.target.closest ? e.target.closest('[data-uma]') : null;
+    if (row && !(e.pointerType === 'touch' && row.classList.contains('stack-row'))) {
       const card = document.getElementById(`uma-${row.dataset.uma}`);
       if (card) { card.open = true; card.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     }

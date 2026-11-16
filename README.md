@@ -36,13 +36,18 @@ The page contains:
 - where the points come from;
 - results by distance;
 - each uma's points split by source, with diagnostics and a card (races and skills), ordered
-  by distance or by average score;
+  by distance or by average score; clicking an uma in the chart or in the diagnostics table
+  opens its card;
 - your stats compared with your opponents';
 - skills that never fired;
 - race-by-race details;
 - priorities;
 - a legend;
 - CSV export to the clipboard.
+
+On screens at least 1,280 px wide, the **Full width** button in the top bar lets the page use
+the whole window (on very wide screens the uma cards go in two columns). The choice is
+remembered on the device.
 
 | File | Role |
 |---|---|

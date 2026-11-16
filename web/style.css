@@ -207,6 +207,25 @@ a { color: inherit; }
 }
 .sections a:hover { background: var(--turf-2); opacity: 1; }
 .load-btn { margin-left: auto; flex: none; }
+.btn.wide-btn { flex: none; color: var(--turf-ink); border-color: color-mix(in oklab, var(--turf-ink) 35%, transparent); }
+.btn.wide-btn:hover { border-color: var(--turf-ink); background: var(--turf-2); }
+.btn.wide-btn[aria-pressed="true"] { background: var(--turf-ink); color: var(--turf); border-color: transparent; }
+.btn.wide-btn { margin-left: auto; }
+
+/* Full width: on large screens the page can use the whole window */
+@media (max-width: 1279px) { .btn.wide-btn { display: none; } }
+@media (min-width: 1280px) { .btn.wide-btn + .load-btn { margin-left: 0; } }
+@media (min-width: 1280px) {
+  html.wide { --maxw: none; }
+  html.wide .topbar-inner { max-width: none; }
+  html.wide .page { max-width: none; padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); }
+  html.wide .topbar { padding-left: 32px; padding-right: 32px; }
+}
+@media (min-width: 1700px) {
+  /* two columns of uma cards, so the extra width is filled instead of stretched */
+  html.wide .uma-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  html.wide .tiles { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+}
 
 /* ------------------------------------------------------------ buttons */
 .btn {
@@ -404,8 +423,10 @@ table.diag td { padding-block: 6px; }
 .seg.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .stack-row[data-uma] { cursor: pointer; border-radius: 6px; }
 .stack-row[data-uma]:hover { background: var(--surface-2); }
-.stack-name a { color: inherit; text-decoration: none; }
-.stack-name a:hover, .stack-name a:focus-visible { text-decoration: underline; }
+.stack-name a, table.diag td.first a { color: inherit; text-decoration: none; }
+.stack-name a:hover, .stack-name a:focus-visible, table.diag td.first a:hover, table.diag td.first a:focus-visible { text-decoration: underline; }
+table.diag tr[data-uma] { cursor: pointer; }
+table.diag tbody tr[data-uma]:hover td { background: var(--surface-2); }
 .stack-name .rank { display: inline-block; min-width: 2ch; margin-right: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (min-width: 621px) {
   .stack-chart.by-score .stack-row, .stack-chart.by-score .axis-row { grid-template-columns: 290px minmax(0, 1fr) 7ch; }
