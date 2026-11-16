@@ -722,6 +722,7 @@
     $('#report').innerHTML = A
       ? [secSummary(A), secScoring(A), secDistances(A), secUmas(A), secOpponents(A), secSkills(A), secRaces(A), secPriorities(A), secLegend(A)].join('')
       : '';
+    if (typeof spy === 'function') requestAnimationFrame(spy);
   }
 
   // ------------------------------------------------------------ interactions
@@ -823,6 +824,32 @@
   });
 
   const input = $('#file-input');
+  // highlight in the top bar the section being read
+  const nav = $('#nav');
+  let spyQueued = false;
+  function spy() {
+    spyQueued = false;
+    if (nav.hidden) return;
+    const top = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 80;
+    let current = null;
+    document.querySelectorAll('#report > .section').forEach((s) => { if (s.getBoundingClientRect().top <= top + 40) current = s.id; });
+    if (innerHeight + scrollY >= document.documentElement.scrollHeight - 4) {
+      const last = document.querySelector('#report > .section:last-child'); if (last) current = last.id;
+    }
+    nav.querySelectorAll('a').forEach((a) => {
+      const on = a.getAttribute('href') === `#${current}`;
+      if (on !== (a.getAttribute('aria-current') === 'true')) {
+        if (on) {
+          a.setAttribute('aria-current', 'true');
+          const l = a.offsetLeft - nav.offsetLeft; // keep the active link visible in the scrolling bar
+          if (l < nav.scrollLeft || l + a.offsetWidth > nav.scrollLeft + nav.clientWidth) nav.scrollTo({ left: l - 24, behavior: 'smooth' });
+        } else a.removeAttribute('aria-current');
+      }
+    });
+  }
+  addEventListener('scroll', () => { if (!spyQueued) { spyQueued = true; requestAnimationFrame(spy); } }, { passive: true });
+  addEventListener('resize', () => requestAnimationFrame(spy));
+
   // re-render only the race list (and the filters, unless only the page grew)
   function rerenderRaces(listOnly) {
     const A = state.analysis; if (!A) return;

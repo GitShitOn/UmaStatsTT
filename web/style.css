@@ -44,6 +44,8 @@
   --step-2: 1.5rem;
   --step-3: 2.125rem;
   --step-4: 3rem;
+  --band: #e2e9e3;
+  --sec-num: #1d5b3a;
   --radius: 10px;
   --maxw: 1140px;
 }
@@ -74,6 +76,8 @@
     --div-pos: #3987e5;
     --div-neg: #e66767;
     --div-mid: #222c25;
+    --band: #121b16;
+    --sec-num: #5cb784;
     --grid: #233028;
     --axis: #364338;
     color-scheme: dark;
@@ -104,6 +108,8 @@
   --div-pos: #3987e5;
   --div-neg: #e66767;
   --div-mid: #222c25;
+  --band: #121b16;
+  --sec-num: #5cb784;
   --grid: #233028;
   --axis: #364338;
   color-scheme: dark;
@@ -206,6 +212,7 @@ a { color: inherit; }
   opacity: 0.86;
 }
 .sections a:hover { background: var(--turf-2); opacity: 1; }
+.sections a[aria-current="true"] { background: var(--turf-ink); color: var(--turf); opacity: 1; }
 .load-btn { margin-left: auto; flex: none; }
 .btn.wide-btn { flex: none; color: var(--turf-ink); border-color: color-mix(in oklab, var(--turf-ink) 35%, transparent); }
 .btn.wide-btn:hover { border-color: var(--turf-ink); background: var(--turf-2); }
@@ -313,9 +320,40 @@ a { color: inherit; }
 .status .errors { flex-basis: 100%; color: var(--bad-text); }
 
 /* ------------------------------------------------------------ sections */
-#report { display: grid; grid-template-columns: minmax(0, 1fr); gap: 44px; }
-.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; }
+#report { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; counter-reset: sec; }
+.section { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; min-width: 0; counter-increment: sec;
+  padding-block: 40px 48px; }
+#report > .section:first-child { padding-top: 8px; }
+/* every other section sits on a full-width tinted band, so each one reads as its own block */
+#report > .section:nth-child(even) {
+  background: var(--band);
+  box-shadow: 0 0 0 100vmax var(--band);
+  clip-path: inset(0 -100vmax);
+}
 .section-head { display: grid; gap: 6px; }
+/* section title: number badge + eyebrow + title, with a rule under it */
+.section > .section-head:first-child {
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 14px;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 6px;
+}
+.section > .section-head:first-child::before {
+  content: counter(sec, decimal-leading-zero);
+  grid-row: 1 / span 2;
+  align-self: end;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: var(--step-4);
+  line-height: 0.85;
+  color: var(--sec-num);
+}
+.section > .section-head:first-child > p:not(.eyebrow) { grid-column: 1 / -1; margin-top: 6px; }
+/* sub-sections inside a section: a short accent bar before the title */
+.section > .section-head:not(:first-child) { margin-top: 14px; }
+.section > .section-head:not(:first-child) > h3 { display: flex; align-items: center; gap: 10px; }
+.section > .section-head:not(:first-child) > h3::before { content: ""; width: 4px; height: 1.1em; border-radius: 2px; background: var(--accent); flex: none; }
 .section-head p { color: var(--ink-2); max-width: 70ch; }
 .panel {
   background: var(--surface);
