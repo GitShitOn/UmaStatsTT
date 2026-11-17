@@ -93,6 +93,7 @@ python3 tt_stats.py data/ --details              # race-by-race breakdown
 python3 tt_stats.py data/ --skills               # full skill table for every uma
 python3 tt_stats.py data/ --md report.md         # also save as Markdown
 python3 tt_stats.py data/ --csv export/          # export the data as CSV for Excel/Sheets
+python3 tt_stats.py data/ --half-life 7          # recent sessions count more (default 14 days; 0 = off)
 python3 tt_stats.py --update-names               # download the names of newly released skills
 ```
 
@@ -126,6 +127,24 @@ script, one skill per line: `"200432": ["Focus", 1]`. The data comes from the
 | Random factors | Effect of mood and frequency of perfect starts |
 | Skills | Activations and points per skill, skills that never fired |
 | What to improve | Full list of priorities, with an estimated gain |
+
+## Recent sessions count more
+
+Opponents get stronger over time (and your team changes), so recent sessions say more about
+your current level than sessions from weeks ago. Every session gets a weight that **halves
+every 2 weeks**, counted back from your latest session (not from today, so a break does not
+devalue your data): a session 2 weeks older than the latest one counts half, 4 weeks older a
+quarter.
+
+- The weights change averages, rates, shares and estimates: points per uma and per distance,
+  "Where the points come from", the stats against the opponents, the uma to retrain, the slot 1
+  check and every estimated gain.
+- Counts stay as they are ("rushed in 8/77 races", wins, the race list, the session chart).
+- Data reliability uses **effective races**: with the weights, older races count less, so 26
+  races spread over two months can be worth about 16.
+- In the web app choose **Recent weight: Off · 4 weeks · 2 weeks · 1 week** at the top of the
+  report (the choice is remembered on the device); in the script use `--half-life DAYS`
+  (`0` = every session counts the same).
 
 ## Which uma to retrain first
 

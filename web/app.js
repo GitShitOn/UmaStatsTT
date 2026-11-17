@@ -16,7 +16,7 @@
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
   const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance',
     raceView: { show: 'all', dist: 'all', uma: 'all', shown: 10 },
-    tableSort: {} };
+    tableSort: {}, halfLife: null };
   const RACE_PAGE = 10;
 
   const $ = (sel) => document.querySelector(sel);
@@ -130,7 +130,7 @@
       }
     }
     state.sessions = sessions;
-    state.analysis = sessions.length ? E.analyze(sessions, skills) : null;
+    state.analysis = sessions.length ? E.analyze(sessions, skills, { halfLife: state.halfLife }) : null;
     state.busy = false;
     render();
   }
@@ -211,23 +211,27 @@
 
   function reliabilityPanel(A) {
     const R = A.reliability;
+    // with the recency weight, older races count less: the level uses "effective" races
+    const weighted = A.halfLife > 0 && R.minEff !== R.minRaces;
+    const base = A.halfLife > 0 ? R.minEff : R.minRaces;
+    const effWord = weighted ? 'effective ' : '';
     const label = { reliable: 'Reliable', preliminary: 'Preliminary', 'very limited': 'Very limited' }[R.level];
     const cls = R.level === 'reliable' ? 'good' : R.level === 'preliminary' ? '' : 'bad';
     let detail;
     if (R.level === 'reliable') {
-      detail = `Every uma on the team has at least ${R.minRaces} races; ${R.reliableRaces} are enough for reliable results.`;
+      detail = `Every uma on the team has at least ${R.minRaces} races${weighted ? ` (${R.minEff} effective: older races count less)` : ''}; ${R.reliableRaces} are enough for reliable results.`;
     } else {
-      const counts = [...new Set(R.few.map((f) => f.n))].sort((x, y) => x - y);
+      const counts = [...new Set(R.few.map((f) => f.eff))].sort((x, y) => x - y);
       const shortTxt = R.few.length === R.nCurrent
-        ? `Every uma on the team has ${counts.length === 1 ? counts[0] : `${counts[0]}–${counts[counts.length - 1]}`} ${plural(counts[counts.length - 1], 'race', 'races')} so far.`
-        : `Still short: ${R.few.slice(0, 6).map((f) => `${f.name} (${f.n})`).join(', ')}${R.few.length > 6 ? ', …' : ''}.`;
-      const need = R.reliableRaces - R.minRaces;
-      detail = `For reliable results load at least ${R.reliableRaces} sessions with the same team (${R.reliableRaces} races per uma); below ${R.minRacesNeeded} the per-uma numbers are only a first idea. ${shortTxt} About ${need} more ${plural(need, 'session', 'sessions')} needed.`;
+        ? `Every uma on the team has ${counts.length === 1 ? counts[0] : `${counts[0]}–${counts[counts.length - 1]}`} ${effWord}${plural(counts[counts.length - 1], 'race', 'races')} so far.`
+        : `Still short: ${R.few.slice(0, 6).map((f) => `${f.name} (${f.n}${f.eff !== f.n ? `, ${f.eff} effective` : ''})`).join(', ')}${R.few.length > 6 ? ', …' : ''}.`;
+      const need = R.reliableRaces - base;
+      detail = `For reliable results load at least ${R.reliableRaces} sessions with the same team (${R.reliableRaces} races per uma); below ${R.minRacesNeeded} the per-uma numbers are only a first idea.${weighted ? ' With the recency weight older races count less, so the count uses effective races.' : ''} ${shortTxt} About ${need} more ${plural(need, 'session', 'sessions')} needed.`;
     }
-    const done = Math.min(1, R.minRaces / R.reliableRaces);
-    const meterLabel = R.minRaces >= R.reliableRaces ? `${R.minRaces} races per uma (${R.reliableRaces} needed)` : `${R.minRaces} of ${R.reliableRaces} races per uma`;
+    const done = Math.min(1, base / R.reliableRaces);
+    const meterLabel = base >= R.reliableRaces ? `${base} ${effWord}races per uma (${R.reliableRaces} needed)` : `${base} of ${R.reliableRaces} ${effWord}races per uma`;
     return `<div class="panel reliability">
-      <div class="rel-head"><h3>Data reliability</h3><span class="flag ${cls}">${label}</span><span class="small muted">${R.sessions} ${plural(R.sessions, 'session', 'sessions')} · ${R.races} races</span></div>
+      <div class="rel-head"><h3>Data reliability</h3><span class="flag ${cls}">${label}</span><span class="small muted">${R.sessions} ${plural(R.sessions, 'session', 'sessions')} · ${R.races} races${A.halfLife > 0 ? ` · about ${fi(R.effSessions)} effective sessions` : ''}</span></div>
       <div class="rel-meter"><div class="meter" role="img" aria-label="${esc(meterLabel)}"><i style="width:${(done * 100).toFixed(0)}%"></i></div><span class="small">${esc(meterLabel)}</span></div>
       <p class="note">${esc(detail)} With ${R.reliableRaces} races an uma’s average points land within ±1,500 of its long-run value 9 times out of 10; with 5 races, 2 times out of 3.</p>
     </div>`;
@@ -275,7 +279,7 @@
       ${retrainPanel(A)}
       ${reliabilityPanel(A)}
       <div class="tiles">
-        ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}`)}
+        ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}${A.halfLife > 0 ? ', recent ones count more' : ''}`)}
         ${tile('Average points per race', fi(A.raceAvg), `${A.nRaces} races`)}
         ${tile('Races won', `${A.wins} of ${A.nRaces}`, `${pct(A.wins / A.nRaces)} · ${A.victories} of ${A.nSessions} matches won`)}
         ${tile('1 base point is worth', `${ff(A.mult, 2)} final`, `${ff(A.mult + 0.1, 2)} for the first uma of the distance`)}
@@ -694,10 +698,27 @@
       ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 385 races.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
       <p class="note">Race files: <a href="https://github.com/ayaliz/horseACT" target="_blank" rel="noopener">horseACT</a>, a Hachimi plugin. Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
+      <p class="note">Recent weight (top of the report): with “2 weeks”, a session 2 weeks older than your latest one counts half, 4 weeks older a quarter. It changes averages, rates, shares and estimates, so they follow your current level and the current opponents; counts such as “19/49”, the session chart and the race list stay as they are.</p>
     </section>`;
   }
 
   // ------------------------------------------------------------ rendering
+
+  // recency weight: a session counts half after this many days (counted from the latest session)
+  const HALF_LIFE_KEY = 'umastats.halfLife';
+  const HALF_LIVES = [[0, 'Off'], [28, '4 weeks'], [14, '2 weeks'], [7, '1 week']];
+  function loadHalfLife() {
+    try { const v = localStorage.getItem(HALF_LIFE_KEY); if (v != null && HALF_LIVES.some(([d]) => String(d) === v)) return Number(v); } catch (e) { /* storage not available */ }
+    return E.DEFAULT_HALF_LIFE;
+  }
+  function weightBar(A) {
+    const hl = A.halfLife;
+    const opt = ([d, l]) => `<button type="button" class="seg${hl === d ? ' on' : ''}" data-action="half-life" data-v="${d}" aria-pressed="${hl === d}">${l}</button>`;
+    const note = hl > 0
+      ? `A session ${hl === 7 ? '1 week' : `${hl / 7} weeks`} older than your latest one counts half, ${hl * 2 / 7} weeks older a quarter. Averages, rates and estimates use the weights; counts and the race list do not.`
+      : 'Every session counts the same.';
+    return `<div class="weightbar"><div class="sortbar" role="group" aria-label="Recent weight"><span class="small muted" title="How much more recent sessions count than older ones">Recent weight</span>${HALF_LIVES.map(opt).join('')}</div><span class="small muted">${note}</span></div>`;
+  }
 
   function renderStatus() {
     const el = $('#status');
@@ -717,7 +738,8 @@
       else text = `${what}.`;
       if (A.missingReplay) text += ' <span class="muted">Some races have an unreadable replay: HP, skill and start diagnostics are partial.</span>';
       if (A.badChecks) text += ` <span class="muted">In ${A.badChecks} races the points do not add up to the total.</span>`;
-      actions = `<div class="status-actions"><label class="btn" for="file-input">Add files</label>${state.source === 'demo' ? '' : '<button class="btn btn-ghost" type="button" data-action="clear">Clear</button>'}</div>`;
+      actions = `<div class="status-actions"><label class="btn" for="file-input">Add files</label>${state.source === 'demo' ? '' : '<button class="btn btn-ghost" type="button" data-action="clear">Clear</button>'}</div>`
+        + weightBar(A);
     } else if (window.UMA_DEMO && window.UMA_DEMO.files) {
       text = 'Want to see how it works first?';
       actions = '<div class="status-actions"><button class="btn" type="button" data-action="demo">Show the example</button></div>';
@@ -901,6 +923,17 @@
       if (sec && state.analysis) { sec.outerHTML = secUmas(state.analysis); enhanceSortable(document.getElementById('umas')); }
       return;
     }
+    if (a === 'half-life') {
+      state.halfLife = Number(btn.dataset.v) || 0;
+      try { localStorage.setItem(HALF_LIFE_KEY, String(state.halfLife)); } catch (err) { /* storage not available */ }
+      if (state.sessions && state.sessions.length) {
+        const y = scrollY;
+        state.analysis = E.analyze(state.sessions, skills, { halfLife: state.halfLife });
+        render();
+        scrollTo(0, y);
+      }
+      return;
+    }
     if (a.startsWith('race-')) {
       const v = state.raceView;
       if (a === 'race-show') { v.show = btn.dataset.v; v.shown = RACE_PAGE; }
@@ -992,6 +1025,7 @@
 
   (async function start() {
     state.umaSort = loadSort();
+    state.halfLife = loadHalfLife();
     const saved = await loadSaved();
     if (saved && saved.length) {
       state.files = saved;

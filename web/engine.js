@@ -137,6 +137,47 @@
   const plural = (n, one, many) => (n === 1 ? one : many);
   const mean = (xs) => { const v = xs.filter((x) => x != null && !Number.isNaN(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
   const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
+
+  // ---------------------------------------------------------------- recency weights
+  // Every session gets a weight that halves every `halfLife` days, counted back from the latest
+  // session (not from today, so a break does not devalue everything). Races and runs take their
+  // session's weight. Averages, rates and estimates use the weights; counts stay plain counts.
+  const DEFAULT_HALF_LIFE = 14;
+  const wOf = (x) => (x && x.w != null ? x.w : 1);
+  /** Weighted mean of fn(x), skipping null/NaN values. */
+  const wmean = (items, fn) => {
+    let s = 0; let t = 0;
+    items.forEach((x) => { const v = fn(x); if (v != null && !Number.isNaN(v)) { s += wOf(x) * v; t += wOf(x); } });
+    return t ? s / t : null;
+  };
+  /** Weighted sum of fn(x) (of 1 without fn). */
+  const wsum = (items, fn) => items.reduce((a, x) => a + wOf(x) * (fn ? (fn(x) || 0) : 1), 0);
+  /** Weighted share of items for which pred(x) holds. */
+  const wrate = (items, pred) => { const t = wsum(items); return t ? wsum(items, (x) => (pred(x) ? 1 : 0)) / t : 0; };
+  /** Effective sample size (Kish): equals items.length when all weights are equal. */
+  const neff = (items) => { const s = wsum(items); const s2 = items.reduce((a, x) => a + wOf(x) ** 2, 0); return s2 ? (s * s) / s2 : 0; };
+  /** Weighted mean of every value in each item's list (lists of bonus rates or multipliers). */
+  const wflat = (items, listOf) => {
+    let s = 0; let t = 0;
+    items.forEach((x) => (listOf(x) || []).forEach((v) => { s += wOf(x) * v; t += wOf(x); }));
+    return t ? s / t : null;
+  };
+  function labelTime(label) {
+    const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})/.exec(label || '');
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) : null;
+  }
+  /** Sets .w on every session, race, run and opponent. halfLife 0 (or null) = all weights 1. */
+  function applyWeights(sessions, halfLife) {
+    const times = sessions.map((s) => labelTime(s.label));
+    const known = times.filter((t) => t != null);
+    const last = known.length ? Math.max(...known) : null;
+    sessions.forEach((s, i) => {
+      const age = last != null && times[i] != null ? (last - times[i]) / 864e5 : 0;
+      s.w = halfLife > 0 ? 0.5 ** (age / halfLife) : 1;
+      s.ageDays = age;
+      s.races.forEach((r) => { r.w = s.w; r.ours.forEach((u) => { u.w = s.w; }); r.opponents.forEach((o) => { o.w = s.w; }); });
+    });
+  }
   const inc = (obj, k, v = 1) => { obj[k] = (obj[k] || 0) + v; };
   const get = (obj, k) => obj[k] || 0;
 
@@ -170,12 +211,16 @@
   const MIN_RACES = 5;
 
   function reliability(umas, sessions) {
+    // with recency weights an uma's races count as fewer "effective" races (Kish), rounded
     const cur = umas.filter((a) => a.current).length ? umas.filter((a) => a.current) : umas;
+    const eff = (a) => Math.round(a.neff + 1e-9);
     const minRaces = cur.length ? Math.min(...cur.map((a) => a.n)) : 0;
-    const few = cur.filter((a) => a.n < RELIABLE_RACES).map((a) => ({ name: a.name, n: a.n })).sort((x, y) => x.n - y.n || x.name.localeCompare(y.name));
-    const level = minRaces >= RELIABLE_RACES ? 'reliable' : minRaces >= MIN_RACES ? 'preliminary' : 'very limited';
-    return { level, sessions: sessions.length, races: sum(sessions.map((s) => s.races.length)), minRaces, few,
-      nCurrent: cur.length, reliableRaces: RELIABLE_RACES, minRacesNeeded: MIN_RACES };
+    const minEff = cur.length ? Math.min(...cur.map(eff)) : 0;
+    const few = cur.filter((a) => eff(a) < RELIABLE_RACES).map((a) => ({ name: a.name, n: a.n, eff: eff(a) }))
+      .sort((x, y) => x.eff - y.eff || x.name.localeCompare(y.name));
+    const level = minEff >= RELIABLE_RACES ? 'reliable' : minEff >= MIN_RACES ? 'preliminary' : 'very limited';
+    return { level, sessions: sessions.length, races: sum(sessions.map((s) => s.races.length)), minRaces, minEff, few,
+      effSessions: neff(sessions), nCurrent: cur.length, reliableRaces: RELIABLE_RACES, minRacesNeeded: MIN_RACES };
   }
 
   /**
@@ -189,16 +234,16 @@
     if (cur.length < 2) return [];
     const avgRaw = new Map(cur.map((a) => [a.key, a.avg((r) => r.raw)]));
     const bench = mean([...avgRaw.values()].sort((x, y) => y - x).slice(0, 3));
-    const teamMult = mean(races.filter((r) => r.teamRaw).map((r) => r.teamFinal / r.teamRaw)) ?? mult;
-    const culprit = {};
-    races.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprit, out[0].key); });
+    const teamMult = wmean(races.filter((r) => r.teamRaw), (r) => r.teamFinal / r.teamRaw) ?? mult;
+    const culprit = {}; const culpritW = {};
+    races.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) { inc(culprit, out[0].key); inc(culpritW, out[0].key, wOf(r)); } });
     const raceOf = new Map(races.map((r) => [`${r.session}|${r.rnd}`, r]));
     const rows = cur.map((a) => {
       const n = a.n; const st = a.last.stats; const u = a.last;
       const own = Math.max(0, bench - avgRaw.get(a.key)) * a.multiplier;
-      const team = get(culprit, a.key) / n * 4000 * teamMult;
-      const first = a.count((r) => r.finish === 1) / n;
-      const top5 = a.count((r) => r.finish <= 5) / n;
+      const team = get(culpritW, a.key) / a.wsum * 4000 * teamMult;
+      const first = a.rate((r) => r.finish === 1);
+      const top5 = a.rate((r) => r.finish <= 5);
       const why = [`average place ${ff(a.avg((r) => r.finish), 1)}, 1st in ${pct(first)} of its races, top 5 in ${pct(top5)}`];
       const needs = [];
       if (get(culprit, a.key)) why.push(`cost the team bonus ${culprit[a.key]} ${plural(culprit[a.key], 'time', 'times')} as the only uma outside the top 5`);
@@ -210,27 +255,29 @@
       });
       const short = a.count(staminaShort);
       const rushed = a.count(isRushed);
-      if (short / n >= 0.2) why.push(`ran out of stamina in ${short}/${n} races`);
-      if (rushed / n >= 0.15) why.push(`rushed in ${rushed}/${n} races`);
+      const shortRate = a.rate(staminaShort);
+      const rushedRate = a.rate(isRushed);
+      if (shortRate >= 0.2) why.push(`ran out of stamina in ${short}/${n} races`);
+      if (rushedRate >= 0.15) why.push(`rushed in ${rushed}/${n} races`);
       if (uniqueId(a.races[a.races.length - 1]) != null) {
         const k = a.count((r) => get(r.catCount, 'unique') > 0);
-        if (k / n < 0.6) why.push(`unique skill fired in only ${k}/${n} races`);
+        if (a.rate((r) => get(r.catCount, 'unique') > 0) < 0.6) why.push(`unique skill fired in only ${k}/${n} races`);
       }
       // stats against the opponents that finished ahead of it
-      const ahead = a.races.flatMap((x) => raceOf.get(`${x.session}|${x.rnd}`).opponents.filter((o) => o.finish < x.finish).map((o) => o.stats));
+      const ahead = a.races.flatMap((x) => raceOf.get(`${x.session}|${x.rnd}`).opponents.filter((o) => o.finish < x.finish));
       const gaps = [];
       if (ahead.length >= 3) {
         STAT_KEYS.forEach(([k, lbl]) => {
-          const g = st[k] - mean(ahead.map((s) => s[k]));
+          const g = st[k] - wmean(ahead, (o) => o.stats[k]);
           if (g <= -50) gaps.push([g, lbl, k]);
         });
       }
       gaps.sort((x, y) => x[0] - y[0]);
       gaps.slice(0, 3).forEach(([g, lbl, k]) => needs.push(`${lbl} about ${fi(st[k] - g)}+ (now ${fi(st[k])}, as the rivals that beat it)`));
-      if (short / n >= 0.2 && !gaps.some(([, , k]) => k === 'stamina')) needs.push(`more STA than ${fi(st.stamina)}`);
-      if (rushed / n >= 0.15 && !gaps.some(([, , k]) => k === 'wiz')) needs.push(`more WIT than ${fi(st.wiz)}`);
+      if (shortRate >= 0.2 && !gaps.some(([, , k]) => k === 'stamina')) needs.push(`more STA than ${fi(st.stamina)}`);
+      if (rushedRate >= 0.15 && !gaps.some(([, , k]) => k === 'wiz')) needs.push(`more WIT than ${fi(st.wiz)}`);
       return { name: a.name, key: a.key, dist: a.distLabel, mainDist: a.mainDist, n, loss: own + team, own, team,
-        preliminary: n < RELIABLE_RACES, why, needs };
+        preliminary: Math.round(a.neff + 1e-9) < RELIABLE_RACES, why, needs };
     });
     rows.sort((x, y) => y.loss - x.loss);
     return rows;
@@ -249,6 +296,7 @@
       const ace = group.find((a) => a.last.slot === 1);
       if (!ace) return;
       const mine = new Map(ace.races.filter((r) => r.distType === dt).map((r) => [r.session, r.raw]));
+      const wOfSession = new Map(ace.races.map((r) => [r.session, wOf(r)]));
       let best = null; let checked = false;
       group.forEach((b) => {
         if (b === ace) return;
@@ -256,14 +304,17 @@
         const common = [...mine.keys()].filter((k) => theirs.has(k));
         if (common.length < MIN_RACES) return;
         checked = true;
-        const diffs = common.map((k) => theirs.get(k) - mine.get(k));
-        const m = mean(diffs);
-        const sd = Math.sqrt(diffs.reduce((t, x) => t + (x - m) ** 2, 0) / (diffs.length - 1));
-        const se = sd / Math.sqrt(diffs.length);
+        // weighted paired difference; with equal weights this is the usual mean and standard error
+        const pairs = common.map((k) => ({ d: theirs.get(k) - mine.get(k), w: wOfSession.get(k) }));
+        const m = wmean(pairs, (p) => p.d);
+        const ne = neff(pairs);
+        const varW = wmean(pairs, (p) => (p.d - m) ** 2);
+        const se = ne > 1 ? Math.sqrt(varW / (ne - 1)) : Infinity;
         const z = se > 0 ? m / se : (m > 0 ? Infinity : 0);
         if (m > 0 && z >= 1 && (!best || m > best.diff)) {
           best = { dist: DIST_NAMES[dt] || String(dt), ace: ace.name, cand: b.name, candKey: b.key, diff: m, z, n: common.length,
-            aceAvg: mean(common.map((k) => mine.get(k))), candAvg: mean(common.map((k) => theirs.get(k))), gain: 0.1 * m };
+            aceAvg: wmean(common.map((k) => ({ v: mine.get(k), w: wOfSession.get(k) })), (p) => p.v),
+            candAvg: wmean(common.map((k) => ({ v: theirs.get(k), w: wOfSession.get(k) })), (p) => p.v), gain: 0.1 * m };
         }
       });
       if (best) warnings.push(best);
@@ -656,10 +707,12 @@
     const a = {
       key, tcid: races[0].tcid, current, name: races[0].name, races, n: races.length, last: races[races.length - 1],
       mainDist: dists[0], distLabel: dists.map((d) => DIST_NAMES[d] || d).join('/'),
-      avg: (fn) => mean(races.map(fn)),
-      count: (pred) => races.filter(pred).length,
+      avg: (fn) => wmean(races, fn),            // weighted toward recent races
+      count: (pred) => races.filter(pred).length, // plain count
+      rate: (pred) => wrate(races, pred),         // weighted share
+      wsum: wsum(races), neff: neff(races),
     };
-    a.multiplier = mean(races.flatMap((r) => r.multipliers)) ?? 1;
+    a.multiplier = wflat(races, (r) => r.multipliers) ?? 1;
     return a;
   }
 
@@ -679,6 +732,8 @@
   function makeRecommendations(umas, races, allUr, mult, skills, sessions) {
     const est = []; const notes = [];
     const nSessions = Math.max(1, new Set(races.map((r) => r.session)).size);
+    // weighted number of sessions: "per session" amounts are weighted sums divided by this
+    const sessW = sessions && sessions.length ? wsum(sessions) : nSessions;
     const labels = {};
     umas.forEach((a) => { labels[a.key] = a.label; });
     // advice covers only the current team (latest session); history stays in the statistics
@@ -703,10 +758,10 @@
         if (outs.length) causes.push(`ran out of HP before the finish (on average ${fi(mean(outs.map((r) => r.hpZeroLeft)))} m out)`);
         if (short.some(spurtLate)) causes.push('started the final spurt late');
         const rushedToo = short.filter(isRushed).length;
-        const gain = short.length / n * 1000 * m * perSession;
+        const gain = a.rate(staminaShort) * 1000 * m * perSession;
         est.push({ gain, uma: a.name, kind: 'stamina', text: `${a.name}: not enough stamina in ${short.length}/${n} races (${where}${rushedToo ? `, ${rushedToo} with rushed` : ''}): ${causes.join(' and ')}. With STA ${st.stamina} it needs more Stamina or recovery skills. Estimate: about 1 place, i.e. 1,000 base.` });
       } else {
-        const hpEnd = mean(a.races.map((r) => r.hpEndPct));
+        const hpEnd = a.avg((r) => r.hpEndPct);
         if (hpEnd != null && hpEnd >= 0.15 && n >= 2) {
           notes.push({ prio: 3, uma: a.name, text: `${a.name}: finishes with ${pct(hpEnd)} HP on average and never runs dry. STA ${st.stamina} is probably more than needed: in future training you can move points to SPD or POW.` });
         }
@@ -714,17 +769,18 @@
 
       if (n >= 2 && a.races.some((r) => uniqueId(r) != null)) {
         const k = a.count((r) => get(r.catCount, 'unique') > 0);
-        if (k / n < 0.6) {
-          const val = mean(a.races.map((r) => r.uniqueValue).filter(Boolean)) || 2400;
+        const rate = a.rate((r) => get(r.catCount, 'unique') > 0);
+        if (rate < 0.6) {
+          const val = wmean(a.races.filter((r) => r.uniqueValue), (r) => r.uniqueValue) || 2400;
           const uid = uniqueId(a.last);
           const uname = uid != null && skills.name(uid) ? ` “${skills.name(uid)}”` : '';
-          est.push({ gain: (1 - k / n) * val * m * perSession, uma: a.name, kind: 'unique', text: `${a.name}: unique skill${uname} fired only ${k}/${n} times (${fi(val)} base each). Its position or race-phase conditions rarely happen with the current strategy and distance.` });
+          est.push({ gain: (1 - rate) * val * m * perSession, uma: a.name, kind: 'unique', text: `${a.name}: unique skill${uname} fired only ${k}/${n} times (${fi(val)} base each). Its position or race-phase conditions rarely happen with the current strategy and distance.` });
         }
       }
 
       const k = a.count(isRushed);
       if (k >= 2 || (n >= 2 && k / n >= 0.4)) {
-        const loss = sum(a.races.map((r) => r.rushedLoss)) / n;
+        const loss = a.avg((r) => r.rushedLoss);
         const hint = st.wiz < 1200 ? 'raising Wit lowers the risk' : 'Wit is already high, it is mostly bad luck';
         est.push({ gain: loss * m * perSession, uma: a.name, kind: 'rushed', text: `${a.name}: rushed in ${k}/${n} races (−${fi(loss)} base per race in penalties, plus wasted HP). WIT ${st.wiz}, theoretical risk about ${pct(rushedChance(st.wiz))}: ${hint}.` });
       }
@@ -732,7 +788,7 @@
 
     const rushedUr = allUr.filter(isRushed);
     if (rushedUr.length) {
-      const loss = sum(rushedUr.map((u) => u.rushedLoss * (mean(u.multipliers) ?? mult))) / nSessions;
+      const loss = wsum(rushedUr, (u) => u.rushedLoss * (mean(u.multipliers) ?? mult)) / sessW;
       const risky = cur.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
       est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${allUr.length} runs: about ${fi(loss)} final points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
     }
@@ -741,8 +797,8 @@
     for (const a of cur) {
       const wiz = a.last.stats.wiz;
       if (wiz >= target) continue;
-      const acts = mean(a.races.map((r) => get(r.catCount, 'white') + get(r.catCount, 'gold'))) || 0;
-      const pts = mean(a.races.map((r) => get(r.catRaw, 'white') + get(r.catRaw, 'gold'))) || 0;
+      const acts = a.avg((r) => get(r.catCount, 'white') + get(r.catCount, 'gold')) || 0;
+      const pts = a.avg((r) => get(r.catRaw, 'white') + get(r.catRaw, 'gold')) || 0;
       if (!acts) continue;
       const pNow = skillChance(wiz); const pTgt = skillChance(target);
       const extraRaw = acts / pNow * (pTgt - pNow) * (pts / acts);
@@ -760,12 +816,12 @@
     if (sessions && sessions.length) {
       const lostM = sessions.filter((s) => !s.victory);
       if (lostM.length) {
-        const val = mean(sessions.map((s) => VICTORY_BASE * (1 + (s.oppRate || 0)))) || 0;
+        const val = wmean(sessions, (s) => VICTORY_BASE * (1 + (s.oppRate || 0))) || 0;
         const near = lostM.filter((s) => s.wins === VICTORY_WINS - 1).length;
-        const gain = lostM.length / sessions.length * val;
+        const gain = wrate(sessions, (s) => !s.victory) * val;
         const firsts = [...new Set(races.map((r) => r.distType))].map((dt) => {
           const rs = races.filter((r) => r.distType === dt);
-          return [rs.filter((r) => r.winnerSide === 'us').length / rs.length, DIST_NAMES[dt] || dt];
+          return [wrate(rs, (r) => r.winnerSide === 'us'), DIST_NAMES[dt] || dt];
         }).sort((x, y) => x[0] - y[0]);
         const weak = firsts.slice(0, 2).map(([p, nm]) => `${nm} ${pct(p)}`).join(', ');
         est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} final) missed in ${lostM.length}/${sessions.length} sessions, ${near} of them by a single race: worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; you take 1st least often in ${weak}.` });
@@ -776,15 +832,15 @@
     if (missed.length) {
       const culprits = {};
       missed.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprits, labels[out[0].key] || out[0].name); });
-      const teamMult = mean(races.filter((r) => r.teamRaw).map((r) => r.teamFinal / r.teamRaw)) ?? mult;
-      const gain = missed.length / nSessions * 4000 * teamMult;
+      const teamMult = wmean(races.filter((r) => r.teamRaw), (r) => r.teamFinal / r.teamRaw) ?? mult;
+      const gain = wsum(missed) / sessW * 4000 * teamMult;
       const who = Object.entries(culprits).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([nm, c]) => `${nm} (${c})`).join(', ');
       est.push({ gain, kind: 'team', text: `Team bonus (all 3 in the top 5, 4,000 base) missed in ${missed.length}/${races.length} races: worth up to about ${fi(gain)} per session.${who ? ` Races missed because of a single uma outside the top 5: ${who}.` : ''}` });
     }
 
     const startsUr = allUr.filter((u) => u.startDelay != null);
     if (startsUr.length) {
-      const rate = startsUr.filter((u) => get(u.catCount, 'start')).length / startsUr.length;
+      const rate = wrate(startsUr, (u) => get(u.catCount, 'start'));
       const gain = Math.max(0, 0.5 - rate) * 1000 * mult * allUr.length / nSessions;
       const done = new Set(); const parts = [];
       START_SKILLS.forEach((sid) => {
@@ -799,18 +855,19 @@
       }
     }
 
-    const basePerSession = (sum(allUr.map((u) => u.raw)) + sum(races.map((r) => r.teamRaw))) / nSessions;
+    const basePerSession = (wsum(allUr, (u) => u.raw) + wsum(races, (r) => r.teamRaw)) / sessW;
     const perK = OPP_BONUS_FIT[1] * 1000 * basePerSession;
     notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still beat: stronger rivals also push your umas down the order and can cost the match victory (10,000 base).` });
 
-    const l16 = allUr.filter((u) => get(u.catCount, 'lead16')).length / allUr.length;
-    const l23 = allUr.filter((u) => get(u.catCount, 'lead23')).length / allUr.length;
+    const l16 = wrate(allUr, (u) => get(u.catCount, 'lead16'));
+    const l23 = wrate(allUr, (u) => get(u.catCount, 'lead23'));
     const neverLead = cur.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
     notes.push({ prio: 4, text: `“Leads own strategy” (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in ${pct(l16)} and ${pct(l23)} of runs${neverLead.length ? `; never by ${neverLead.join(', ')}` : ''}. What counts is being ahead of every other uma with the same strategy, opponents included.` });
 
-    const few = cur.filter((a) => a.n < RELIABLE_RACES);
+    const few = cur.filter((a) => Math.round(a.neff + 1e-9) < RELIABLE_RACES);
     if (few.length && few.length < cur.length) {
-      notes.push({ prio: 2, text: `Not enough races yet for: ${few.map((a) => `${a.name} (${a.n} ${plural(a.n, 'race', 'races')})`).join(', ')}. Their numbers become reliable at ${RELIABLE_RACES} races.` });
+      const effTxt = (a) => { const e = Math.round(a.neff + 1e-9); return e !== a.n ? `, about ${e} effective` : ''; };
+      notes.push({ prio: 2, text: `Not enough races yet for: ${few.map((a) => `${a.name} (${a.n} ${plural(a.n, 'race', 'races')}${effTxt(a)})`).join(', ')}. Their numbers become reliable at ${RELIABLE_RACES} races${few.some((a) => Math.round(a.neff + 1e-9) !== a.n) ? ' (effective races: with the recency weight, older races count less)' : ''}.` });
     }
 
     const worst = cur.slice().sort((x, y) => y.avg((r) => r.finish) - x.avg((r) => r.finish)).slice(0, 3);
@@ -834,9 +891,14 @@
 
   // ---------------------------------------------------------------- full analysis
 
-  function analyze(sessions, skills) {
+  /**
+   * opts.halfLife: days after which a session counts half (default 14); 0 = every session counts the same.
+   */
+  function analyze(sessions, skills, opts) {
     skills = skills || new SkillDB();
+    const halfLife = opts && opts.halfLife != null ? Number(opts.halfLife) || 0 : DEFAULT_HALF_LIFE;
     sessions = sessions.slice().sort((a, b) => a.label.localeCompare(b.label));
+    applyWeights(sessions, halfLife);
     const races = sessions.flatMap((s) => s.races);
     const allUr = races.flatMap((r) => r.ours);
     const umas = aggregateUmas(sessions);
@@ -848,7 +910,7 @@
 
     const allRates = {};
     sessions.forEach((s) => Object.entries(s.bonusRates).forEach(([k, v]) => { (allRates[k] ||= []).push(...v); }));
-    const mult = 1 + (mean(allRates.opponent || []) || 0) + (mean(allRates.support || []) || 0);
+    const mult = 1 + (wflat(sessions, (s) => s.bonusRates.opponent) || 0) + (wflat(sessions, (s) => s.bonusRates.support) || 0);
     const supportCfg = [...new Set(sessions.map((s) => s.supportBonus).filter(Boolean))].sort();
     const oppErrs = sessions.filter((s) => s.oppEval && s.selfEval && (s.bonusRates.opponent || []).length)
       .map((s) => Math.abs(mean(s.bonusRates.opponent) - oppBonusModel(s.oppEval, s.selfEval)));
@@ -856,7 +918,7 @@
       maxErr: oppErrs.length ? Math.max(...oppErrs) : null };
     const bonuses = ['opponent', 'support', 'ace', 'streak'].filter((k) => allRates[k] && allRates[k].length).map((k) => {
       const v = allRates[k];
-      return { key: k, label: BONUS_LABELS[k], min: Math.min(...v), max: Math.max(...v), mean: mean(v),
+      return { key: k, label: BONUS_LABELS[k], min: Math.min(...v), max: Math.max(...v), mean: wflat(sessions, (s) => s.bonusRates[k]),
         cfg: k === 'support' && supportCfg.length ? supportCfg.map((x) => x / 10000) : null };
     });
 
@@ -866,36 +928,38 @@
       wins: s.wins, n: s.races.length,
       perRace: s.total / Math.max(1, s.races.length), oppEval: s.oppEval,
       oppRate: mean(s.bonusRates.opponent || []), supRate: s.supportBonus ? s.supportBonus / 10000 : mean(s.bonusRates.support || []),
-      results: s.races.map((r) => r.win),
+      results: s.races.map((r) => r.win), w: s.w, ageDays: s.ageDays,
     }));
 
     // categories
+    // catFinal is weighted (shares and points per race); raw totals and counts are plain
     const catRaw = {}; const catFinal = {}; const catCnt = {}; const catHits = {}; const unit = {};
     allUr.forEach((u) => {
       Object.entries(u.catRaw).forEach(([k, v]) => { inc(catRaw, k, v); inc(catHits, k); });
-      Object.entries(u.catFinal).forEach(([k, v]) => inc(catFinal, k, v));
+      Object.entries(u.catFinal).forEach(([k, v]) => inc(catFinal, k, wOf(u) * v));
       Object.entries(u.catCount).forEach(([k, v]) => inc(catCnt, k, v));
       u.entries.forEach(([rid, num, raw]) => { if (num) (unit[scoreCategory(rid)[0]] ||= new Set()).add(Math.floor(raw / num)); });
     });
     inc(catRaw, 'team', sum(races.map((r) => r.teamRaw)));
-    inc(catFinal, 'team', sum(races.map((r) => r.teamFinal)));
+    inc(catFinal, 'team', wsum(races, (r) => r.teamFinal));
     inc(catCnt, 'team', races.filter((r) => r.teamIds.length).length);
     inc(catHits, 'team', races.filter((r) => r.teamIds.length).length);
     unit.team = new Set(races.filter((r) => r.teamRaw).map((r) => r.teamRaw));
     const won = sessions.filter((s) => s.victory);
     if (won.length) {
       inc(catRaw, 'victory', VICTORY_BASE * won.length);
-      inc(catFinal, 'victory', sum(won.map((s) => s.victoryBonus)));
+      inc(catFinal, 'victory', wsum(won, (s) => s.victoryBonus));
       inc(catCnt, 'victory', won.length);
       inc(catHits, 'victory', won.length);
       unit.victory = new Set([VICTORY_BASE]);
     }
     const grand = sum(Object.values(catFinal));
+    const racesW = wsum(races);
     const categories = CATEGORY_ORDER.filter((k) => catRaw[k] || catCnt[k]).map((k) => {
       const vals = [...(unit[k] || [])].sort((x, y) => x - y);
       return { key: k, label: CATEGORY_LABELS[k], count: get(catCnt, k), hits: get(catHits, k),
         denom: k === 'team' ? nRaces : k === 'victory' ? nSessions : allUr.length, raw: get(catRaw, k), final: get(catFinal, k),
-        share: grand ? get(catFinal, k) / grand : 0, perRace: get(catFinal, k) / Math.max(1, nRaces),
+        share: grand ? get(catFinal, k) / grand : 0, perRace: racesW ? get(catFinal, k) / racesW : 0,
         unitMin: vals[0], unitMax: vals[vals.length - 1] };
     }).sort((a, b) => b.final - a.final); // biggest share first, penalties last
 
@@ -905,14 +969,14 @@
       const urs = rs.flatMap((r) => r.ours);
       const opps = rs.flatMap((r) => r.opponents);
       const statDiff = STAT_KEYS.map(([k, lbl]) => {
-        const o = mean(urs.map((u) => u.stats[k])); const p = mean(opps.map((x) => x.stats[k]));
+        const o = wmean(urs, (u) => u.stats[k]); const p = wmean(opps, (x) => x.stats[k]);
         return { key: k, label: lbl, ours: o, opp: p, diff: o != null && p != null ? o - p : null };
       });
       return {
         dt, name: DIST_NAMES[dt] || String(dt),
         courses: [...new Set(rs.map((r) => r.distance).filter(Boolean))].sort((x, y) => x - y),
-        races: rs.length, wins: rs.filter((r) => r.win).length, avgTotal: mean(rs.map((r) => r.total)),
-        avgFinish: mean(urs.map((u) => u.finish)), oppFinish: mean(opps.map((o) => o.finish)),
+        races: rs.length, wins: rs.filter((r) => r.win).length, avgTotal: wmean(rs, (r) => r.total),
+        avgFinish: wmean(urs, (u) => u.finish), oppFinish: wmean(opps, (o) => o.finish),
         teamBonus: rs.filter((r) => r.teamIds.length).length, ourFirst: rs.filter((r) => r.winnerSide === 'us').length,
         statDiff,
       };
@@ -931,7 +995,7 @@
       return {
         key: a.key, tcid: a.tcid, name: a.name, label: a.label, current: a.current,
         distLabel: a.distLabel, mainDist: a.mainDist, style: a.last.style,
-        slot: a.last.slot, n: a.n, multiplier: a.multiplier,
+        slot: a.last.slot, n: a.n, neff: a.neff, multiplier: a.multiplier,
         finishes: a.races.map((r) => r.finish),
         avgFinish: a.avg((r) => r.finish), avgRaw: a.avg((r) => r.raw), avgFinal: a.avg((r) => r.final),
         src: {
@@ -997,8 +1061,9 @@
       reliability: reliability(umas, sessions),
       retrain: retrainRanking(umas, races, mult),
       aceCheck: aceCheck(umas),
-      totalAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nSessions),
-      raceAvg: sum(sessions.map((s) => s.total)) / Math.max(1, nRaces),
+      halfLife, effSessions: neff(sessions),
+      totalAvg: wmean(sessions, (s) => s.total) || 0,
+      raceAvg: racesW ? wsum(sessions, (s) => s.total) / racesW : 0,
       wins: races.filter((r) => r.win).length,
       victories: sessions.filter((s) => s.victory).length,
       categories, grand, distances, consistent, umas: umaRows, moods, starts, lost, races: raceRows, recs,
@@ -1067,7 +1132,7 @@
 
   const api = {
     DIST_NAMES, STYLE_NAMES, MOOD_NAMES, WEATHER_NAMES, GROUND_NAMES, APT, STAT_KEYS, CATEGORY_LABELS,
-    CATEGORY_ORDER, LEGEND, SkillDB, parseScenario, loadSession, slimFile, isTeamTrialsFile, analyze,
+    CATEGORY_ORDER, LEGEND, DEFAULT_HALF_LIFE, SkillDB, parseScenario, loadSession, slimFile, isTeamTrialsFile, analyze,
     umaRacesCSV, skillsCSV, rushedChance, skillChance, ordinal, plural, fi, ff, pct, RELIABLE_RACES, MIN_RACES,
   };
   root.UmaEngine = api;

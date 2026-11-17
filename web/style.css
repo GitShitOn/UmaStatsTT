@@ -313,6 +313,7 @@ html.is-dark .icon-btn .i-moon { display: none; }
 .status .status-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .status.demo { border-color: var(--accent); background: var(--accent-soft); }
 .status .errors { flex-basis: 100%; color: var(--bad-text); }
+.weightbar { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: 8px; border-top: 1px solid var(--line); }
 
 /* ------------------------------------------------------------ sections */
 #report { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; counter-reset: sec; }

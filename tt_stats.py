@@ -16,6 +16,7 @@ Usage:
     python3 tt_stats.py data/ --details     # adds a race-by-race breakdown
     python3 tt_stats.py data/ --skills      # full skill table for every uma
     python3 tt_stats.py data/ --md report.md --csv export/
+    python3 tt_stats.py data/ --half-life 7  # recent sessions count more (default 14 days, 0 = off)
 
 Standard library only, Python >= 3.8.
 """
@@ -34,6 +35,7 @@ import re
 import struct
 import sys
 from collections import Counter, defaultdict
+from datetime import datetime
 from dataclasses import dataclass, field
 from statistics import mean, stdev
 from typing import Dict, List, Optional, Tuple
@@ -223,6 +225,94 @@ def plural(n: int, one: str, many: str) -> str:
 def safe_mean(xs, default=None):
     xs = [x for x in xs if x is not None]
     return mean(xs) if xs else default
+
+
+# ---------------------------------------------------------------------------
+# Recency weights
+# ---------------------------------------------------------------------------
+# Every session gets a weight that halves every `half_life` days, counted back from the latest
+# session (not from today, so a break does not devalue everything). Races, runs and opponents take
+# their session's weight. Averages, rates and estimates use the weights; counts stay plain counts.
+
+DEFAULT_HALF_LIFE = 14
+
+
+def w_of(x) -> float:
+    return getattr(x, "w", 1.0)
+
+
+def wmean(items, fn, default=None):
+    """Weighted mean of fn(x), skipping None values."""
+    s = t = 0.0
+    for x in items:
+        v = fn(x)
+        if v is not None:
+            s += w_of(x) * v
+            t += w_of(x)
+    return s / t if t else default
+
+
+def wsum(items, fn=None) -> float:
+    return sum(w_of(x) * ((fn(x) or 0) if fn else 1) for x in items)
+
+
+def wrate(items, pred) -> float:
+    """Weighted share of items for which pred(x) holds."""
+    items = list(items)
+    t = wsum(items)
+    return wsum(items, lambda x: 1 if pred(x) else 0) / t if t else 0.0
+
+
+def neff(items) -> float:
+    """Effective sample size (Kish): len(items) when all weights are equal."""
+    items = list(items)
+    s = wsum(items)
+    s2 = sum(w_of(x) ** 2 for x in items)
+    return s * s / s2 if s2 else 0.0
+
+
+def wflat(items, list_of, default=None):
+    """Weighted mean of every value in each item's list (bonus rates, multipliers)."""
+    s = t = 0.0
+    for x in items:
+        for v in (list_of(x) or []):
+            s += w_of(x) * v
+            t += w_of(x)
+    return s / t if t else default
+
+
+def label_time(label: str) -> Optional[datetime]:
+    try:
+        return datetime.strptime(label[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return None
+
+
+def apply_weights(sessions, half_life: float) -> None:
+    """Sets .w on every session, race, run and opponent. half_life 0 = all weights 1."""
+    times = [label_time(s.label) for s in sessions]
+    known = [t for t in times if t is not None]
+    last = max(known) if known else None
+    for s, t in zip(sessions, times):
+        age = (last - t).total_seconds() / 86400 if last is not None and t is not None else 0.0
+        s.w = 0.5 ** (age / half_life) if half_life and half_life > 0 else 1.0
+        for r in s.races:
+            r.w = s.w
+            for u in r.ours:
+                u.w = s.w
+            for o in r.opponents:
+                o.w = s.w
+
+
+@dataclass
+class _W:
+    """A value with a weight, for weighted means of plain numbers."""
+    v: float
+    w: float
+
+
+def eff_round(x: float) -> int:
+    return int(round(x + 1e-9))
 
 
 # ---------------------------------------------------------------------------
@@ -700,15 +790,30 @@ class UmaAgg:
     def main_dist(self) -> int:
         return Counter(r.dist_type for r in self.races).most_common(1)[0][0]
 
-    def avg(self, attr: str):
-        return safe_mean([getattr(r, attr) for r in self.races])
+    def avg(self, attr):
+        """Weighted toward recent races. attr is an attribute name or a function of the race."""
+        fn = attr if callable(attr) else (lambda r: getattr(r, attr))
+        return wmean(self.races, fn)
 
     def count(self, pred) -> int:
+        """Plain count."""
         return sum(1 for r in self.races if pred(r))
+
+    def rate(self, pred) -> float:
+        """Weighted share of races."""
+        return wrate(self.races, pred)
+
+    @property
+    def wsum(self) -> float:
+        return wsum(self.races)
+
+    @property
+    def neff(self) -> float:
+        return neff(self.races)
 
     @property
     def multiplier(self) -> float:
-        return safe_mean([m for r in self.races for m in r.multipliers], 1.0)
+        return wflat(self.races, lambda r: r.multipliers, 1.0)
 
 
 def aggregate_umas(sessions: List[Session]) -> List[UmaAgg]:
@@ -765,28 +870,36 @@ MIN_RACES = 5
 
 def reliability(umas: List[UmaAgg], sessions: List[Session]) -> dict:
     """How much the current data can be trusted: level, races per current uma, umas still short."""
+    # with recency weights an uma's races count as fewer "effective" races (Kish), rounded
     cur = [a for a in umas if a.current] or umas
     min_n = min(a.n for a in cur) if cur else 0
-    few = sorted(((a.name, a.n) for a in cur if a.n < RELIABLE_RACES), key=lambda x: (x[1], x[0]))
-    level = "reliable" if min_n >= RELIABLE_RACES else "preliminary" if min_n >= MIN_RACES else "very limited"
+    min_eff = min(eff_round(a.neff) for a in cur) if cur else 0
+    few = sorted(((a.name, a.n, eff_round(a.neff)) for a in cur if eff_round(a.neff) < RELIABLE_RACES),
+                 key=lambda x: (x[2], x[0]))
+    level = "reliable" if min_eff >= RELIABLE_RACES else "preliminary" if min_eff >= MIN_RACES else "very limited"
     return dict(level=level, sessions=len(sessions), races=sum(len(s.races) for s in sessions),
-                min_races=min_n, few=few, n_current=len(cur))
+                min_races=min_n, min_eff=min_eff, few=few, n_current=len(cur), eff_sessions=neff(sessions))
 
 
 def reliability_text(rel: dict) -> str:
+    weighted = rel["min_eff"] != rel["min_races"]
+    eff_word = "effective " if weighted else ""
+    eff_s = f", about {fi(rel['eff_sessions'])} effective" if abs(rel["eff_sessions"] - rel["sessions"]) > 0.5 else ""
     head = (f"Data: {rel['sessions']} {plural(rel['sessions'], 'session', 'sessions')} "
-            f"({rel['races']} races). Reliability: {rel['level'].upper()}.")
+            f"({rel['races']} races{eff_s}). Reliability: {rel['level'].upper()}.")
     if rel["level"] == "reliable":
-        return (f"{head} Every uma on the team has at least {rel['min_races']} races "
-                f"({RELIABLE_RACES} are enough for reliable results).")
-    counts = sorted({n for _nm, n in rel["few"]})
+        return (f"{head} Every uma on the team has at least {rel['min_races']} races"
+                + (f", {rel['min_eff']} effective (older races count less)" if weighted else "")
+                + f" ({RELIABLE_RACES} are enough for reliable results).")
+    counts = sorted({e for _nm, _n, e in rel["few"]})
     if len(rel["few"]) == rel["n_current"]:
         rng = f"{counts[0]}" if len(counts) == 1 else f"{counts[0]}-{counts[-1]}"
-        short = f"Every uma on the team has {rng} {plural(counts[-1], 'race', 'races')} so far."
+        short = f"Every uma on the team has {rng} {eff_word}{plural(counts[-1], 'race', 'races')} so far."
     else:
-        short = ("Umas still short (races so far): " + ", ".join(f"{nm} ({n})" for nm, n in rel["few"][:6]) +
+        short = ("Umas still short (races so far): " +
+                 ", ".join(f"{nm} ({n}{f', {e} effective' if e != n else ''})" for nm, n, e in rel["few"][:6]) +
                  (", ..." if len(rel["few"]) > 6 else "") + ".")
-    need = RELIABLE_RACES - rel["min_races"]
+    need = RELIABLE_RACES - rel["min_eff"]
     return (f"{head} Recommended: at least {RELIABLE_RACES} sessions with the same team, i.e. {RELIABLE_RACES} "
             f"races per uma; below {MIN_RACES} the per-uma numbers are only a first idea. {short} About {need} more "
             f"{plural(need, 'session', 'sessions')} needed.")
@@ -804,20 +917,22 @@ def retrain_ranking(umas: List[UmaAgg], races: List[Race], mult: float) -> List[
         return []
     avg = {a.key: a.avg("raw") for a in cur}
     bench = mean(sorted(avg.values(), reverse=True)[:3])
-    team_mult = safe_mean([r.team_final / r.team_raw for r in races if r.team_raw], mult)
+    team_mult = wmean([r for r in races if r.team_raw], lambda r: r.team_final / r.team_raw, mult)
     culprit = Counter()
+    culprit_w = Counter()
     for r in races:
         out = [u for u in r.ours if u.finish > 5]
         if len(out) == 1:
             culprit[out[0].key] += 1
+            culprit_w[out[0].key] += w_of(r)
     race_of = {(r.session, r.rnd): r for r in races}
     rows = []
     for a in cur:
         n, st, u = a.n, a.last.stats, a.last
         own = max(0.0, bench - avg[a.key]) * a.multiplier
-        team = culprit[a.key] / n * 4000 * team_mult
-        first = a.count(lambda r: r.finish == 1) / n
-        top5 = a.count(lambda r: r.finish <= 5) / n
+        team = culprit_w[a.key] / a.wsum * 4000 * team_mult
+        first = a.rate(lambda r: r.finish == 1)
+        top5 = a.rate(lambda r: r.finish <= 5)
         why = [f"average place {ff(a.avg('finish'), 1)}, 1st in {pct(first)} of its races, top 5 in {pct(top5)}"]
         needs = []
         if culprit[a.key]:
@@ -832,31 +947,33 @@ def retrain_ranking(umas: List[UmaAgg], races: List[Race], mult: float) -> List[
                 needs.append(need)
         short = a.count(lambda r: r.stamina_short)
         rushed = a.count(lambda r: r.rushed)
-        if short / n >= 0.2:
+        short_rate = a.rate(lambda r: r.stamina_short)
+        rushed_rate = a.rate(lambda r: r.rushed)
+        if short_rate >= 0.2:
             why.append(f"ran out of stamina in {short}/{n} races")
-        if rushed / n >= 0.15:
+        if rushed_rate >= 0.15:
             why.append(f"rushed in {rushed}/{n} races")
         if a.races[-1].has_unique:
             k = a.count(lambda r: r.cat_count["unique"] > 0)
-            if k / n < 0.6:
+            if a.rate(lambda r: r.cat_count["unique"] > 0) < 0.6:
                 why.append(f"unique skill fired in only {k}/{n} races")
         # stats against the opponents that finished ahead of it
-        ahead = [o.stats for x in a.races for o in race_of[(x.session, x.rnd)].opponents if o.finish < x.finish]
+        ahead = [o for x in a.races for o in race_of[(x.session, x.rnd)].opponents if o.finish < x.finish]
         gaps = []
         if len(ahead) >= 3:
             for k, lbl in STAT_KEYS:
-                g = st[k] - mean(s_[k] for s_ in ahead)
+                g = st[k] - wmean(ahead, lambda o: o.stats[k])
                 if g <= -50:
                     gaps.append((g, lbl, k))
         gaps.sort()
         for g, lbl, k in gaps[:3]:
             needs.append(f"{lbl} about {fi(st[k] - g)}+ (now {fi(st[k])}, as the rivals that beat it)")
-        if short / n >= 0.2 and not any(k == "stamina" for _g, _l, k in gaps):
+        if short_rate >= 0.2 and not any(k == "stamina" for _g, _l, k in gaps):
             needs.append(f"more STA than {fi(st['stamina'])}")
-        if rushed / n >= 0.15 and not any(k == "wiz" for _g, _l, k in gaps):
+        if rushed_rate >= 0.15 and not any(k == "wiz" for _g, _l, k in gaps):
             needs.append(f"more WIT than {fi(st['wiz'])}")
         rows.append(dict(name=a.name, dist=a.dist_label, n=n, loss=own + team, own=own, team=team,
-                         preliminary=n < RELIABLE_RACES, why=why, needs=needs))
+                         preliminary=eff_round(a.neff) < RELIABLE_RACES, why=why, needs=needs))
     rows.sort(key=lambda r: -r["loss"])
     return rows
 
@@ -876,6 +993,7 @@ def ace_check(umas: List[UmaAgg]) -> Tuple[List[dict], List[str]]:
         if ace is None:
             continue
         mine = {r.session: r.raw for r in ace.races if r.dist_type == dt}
+        w_session = {r.session: w_of(r) for r in ace.races}
         best, checked = None, False
         for b in group:
             if b is ace:
@@ -885,14 +1003,18 @@ def ace_check(umas: List[UmaAgg]) -> Tuple[List[dict], List[str]]:
             if len(common) < MIN_RACES:
                 continue
             checked = True
-            diffs = [theirs[s_] - mine[s_] for s_ in common]
-            m = mean(diffs)
-            se = stdev(diffs) / math.sqrt(len(diffs))
+            # weighted paired difference; with equal weights this is the usual mean and standard error
+            pairs = [_W(theirs[s_] - mine[s_], w_session[s_]) for s_ in common]
+            m = wmean(pairs, lambda p: p.v)
+            ne = neff(pairs)
+            var_w = wmean(pairs, lambda p: (p.v - m) ** 2)
+            se = math.sqrt(var_w / (ne - 1)) if ne > 1 else math.inf
             z = m / se if se > 0 else (math.inf if m > 0 else 0.0)
             if m > 0 and z >= 1 and (best is None or m > best["diff"]):
                 best = dict(dist=DIST_NAMES.get(dt, str(dt)), ace=ace.name, cand=b.name, diff=m, z=z,
-                            n=len(common), ace_avg=mean(mine[s_] for s_ in common),
-                            cand_avg=mean(theirs[s_] for s_ in common), gain=0.10 * m)
+                            n=len(common), ace_avg=wmean([_W(mine[s_], w_session[s_]) for s_ in common], lambda p: p.v),
+                            cand_avg=wmean([_W(theirs[s_], w_session[s_]) for s_ in common], lambda p: p.v),
+                            gain=0.10 * m)
         if best:
             warnings.append(best)
         elif not checked:
@@ -1034,6 +1156,8 @@ START_SKILLS = {200431, 200432}  # Concentration (gold) and Focus (white): short
 
 def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     R = Report(markdown=bool(args.md_mode))
+    half_life = getattr(args, "half_life", DEFAULT_HALF_LIFE)
+    apply_weights(sessions, half_life)
     races = [r for s in sessions for r in s.races]
     umas = aggregate_umas(sessions)
     labels = {a.key: a.label for a in umas}
@@ -1052,12 +1176,17 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         R.p(f"WARNING: in {len(bad)} races the points do not add up to the total (incomplete data?).")
     if any(u.start_delay is None for u in all_ur):
         R.p("Note: some races have no replay (race_scenario): HP/skill diagnostics are partial.")
+    if half_life and half_life > 0:
+        R.p(f"Recent weight: a session {ff(half_life / 7, 0) if half_life % 7 == 0 else half_life} "
+            f"{'week' if half_life == 7 else 'weeks' if half_life % 7 == 0 else 'days'} older than the latest one "
+            f"counts half (about {fi(neff(sessions))} effective sessions). Averages, rates, shares and estimates use "
+            f"the weights; counts do not. --half-life 0 turns it off.")
 
     allrates = defaultdict(list)
     for s in sessions:
         for k, v in s.bonus_rates.items():
             allrates[k] += v
-    mult_std = 1 + sum(safe_mean(allrates.get(k, []), 0) for k in ("opponent", "support"))
+    mult_std = 1 + sum(wflat(sessions, lambda s, k=k: s.bonus_rates.get(k), 0) for k in ("opponent", "support"))
     est, notes = make_recommendations(umas, races, all_ur, mult_std, skills, sessions)
 
     R.h2("Summary")
@@ -1067,9 +1196,10 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     for line in retrain_text(retrain_ranking(umas, races, mult_std)):
         R.p(line)
     R.p()
-    R.p(f"Average {fi(sum(s.total for s in sessions) / len(sessions))} points per session, "
-        f"{fi(sum(s.total for s in sessions) / n_races)} per race. The 5 things worth the most "
-        f"(estimated final points per session):")
+    R.p(f"Average {fi(wmean(sessions, lambda s: s.total))} points per session, "
+        f"{fi(wsum(sessions, lambda s: s.total) / wsum(races))} per race"
+        + (" (recent sessions count more)" if half_life and half_life > 0 else "")
+        + ". The 5 things worth the most (estimated final points per session):")
     for gain, text in est[:5]:
         R.bullet(f"[~{fi(gain)}] {text}")
     for _prio, text in [x for x in notes if x[0] == 1]:
@@ -1179,35 +1309,43 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     cat_final = Counter()
     cat_cnt = Counter()
     cat_hits = Counter()   # runs in which the category shows up
+    cat_wfinal = Counter()  # weighted: shares and points per race
     for u in all_ur:
         cat_raw.update(u.cat_raw)
         cat_final.update(u.cat_final)
         cat_cnt.update(u.cat_count)
+        for k, v in u.cat_final.items():
+            cat_wfinal[k] += w_of(u) * v
         for k in u.cat_raw:
             cat_hits[k] += 1
     cat_raw["team"] += sum(r.team_raw for r in races)
     cat_final["team"] += sum(r.team_final for r in races)
+    cat_wfinal["team"] += wsum(races, lambda r: r.team_final)
     cat_cnt["team"] += sum(1 for r in races if r.team_ids)
     cat_hits["team"] += sum(1 for r in races if r.team_ids)
     won = [s for s in sessions if s.victory]
     cat_raw["victory"] += VICTORY_BASE * len(won)
     cat_final["victory"] += sum(s.victory_bonus for s in won)
+    cat_wfinal["victory"] += wsum(won, lambda s: s.victory_bonus)
     cat_cnt["victory"] += len(won)
     cat_hits["victory"] += len(won)
     grand = sum(cat_final.values())
+    wgrand = sum(cat_wfinal.values())
+    races_w = wsum(races)
     rows = []
     # biggest share first, penalties last
-    for ck in sorted(CATEGORY_ORDER, key=lambda k: -cat_final.get(k, 0)):
+    for ck in sorted(CATEGORY_ORDER, key=lambda k: -cat_wfinal.get(k, 0)):
         if not cat_raw.get(ck) and not cat_cnt.get(ck):
             continue
         denom = n_races if ck == "team" else len(sessions) if ck == "victory" else len(all_ur)
         rows.append([CATEGORY_LABELS[ck], fi(cat_cnt[ck]), f"{cat_hits[ck]}/{denom}",
-                     fi(cat_raw[ck]), fi(cat_final[ck]), pct(cat_final[ck] / grand, 1),
-                     fi(cat_final[ck] / n_races)])
-    rows.append(["TOTAL", "", "", fi(sum(cat_raw.values())), fi(grand), "100%", fi(grand / n_races)])
+                     fi(cat_raw[ck]), fi(cat_final[ck]), pct(cat_wfinal[ck] / wgrand, 1),
+                     fi(cat_wfinal[ck] / races_w)])
+    rows.append(["TOTAL", "", "", fi(sum(cat_raw.values())), fi(grand), "100%", fi(wgrand / races_w)])
     R.table(["Category", "Events", "Present", "Base total", "Final total", "% total", "Final/race"], rows)
     R.p("'Present' = in how many runs (one uma in one race; for the team bonus: races; for the victory: sessions)")
-    R.p("the category shows up.")
+    R.p("the category shows up." + (" Base/Final totals are plain sums; % total and Final/race use the recency"
+                                     " weight." if half_life and half_life > 0 else ""))
 
     # ---------------- By distance
     R.h2("By distance")
@@ -1218,7 +1356,7 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         dists = sorted({r.distance for r in rs if r.distance})
         rows.append([DIST_NAMES.get(dt, dt), ", ".join(f"{d}m" for d in dists) or "-", len(rs),
                      f"{sum(r.win for r in rs)}-{sum(not r.win for r in rs)}",
-                     fi(mean(r.total for r in rs)), ff(mean(u.finish for u in urs), 1),
+                     fi(wmean(rs, lambda r: r.total)), ff(wmean(urs, lambda u: u.finish), 1),
                      f"{sum(1 for r in rs if r.team_ids)}/{len(rs)}",
                      f"{sum(1 for r in rs if r.winner_side == 'us')}/{len(rs)}"])
     R.table(["Distance", "Courses", "Races", "W-L", "Points/race", "Avg place", "Team bonus", "Our 1st"], rows)
@@ -1238,10 +1376,10 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
                      ff(a.avg("finish"), 1),
                      ("+" + str(a.n - 12) + " " if a.n > 12 else "") + " ".join(str(r.finish) for r in a.races[-12:]),
                      fi(a.avg("raw")), fi(a.avg("final")),
-                     fi(safe_mean([r.cat_raw["place"] for r in a.races])),
-                     fi(safe_mean([sum(r.cat_raw[k] for k in SKILL_CATS) for r in a.races])),
-                     fi(safe_mean([r.cat_raw["start"] + r.cat_raw["lead16"] + r.cat_raw["lead23"] for r in a.races])),
-                     fi(safe_mean([r.cat_raw["rushed"] for r in a.races]))])
+                     fi(a.avg(lambda r: r.cat_raw["place"])),
+                     fi(a.avg(lambda r: sum(r.cat_raw[k] for k in SKILL_CATS))),
+                     fi(a.avg(lambda r: r.cat_raw["start"] + r.cat_raw["lead16"] + r.cat_raw["lead23"])),
+                     fi(a.avg(lambda r: r.cat_raw["rushed"]))])
     R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Last finishes", "Base/r", "Final/r",
              "Placing", "Skills", "Pos/start", "Rushed"], rows, "lllrrrlrrrrrr")
     if any(a.n < RELIABLE_RACES for a in umas):
@@ -1256,11 +1394,11 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
         n = a.n
         has_uni = any(r.has_unique for r in a.races)
         uni_k = a.count(lambda r: r.cat_count["unique"] > 0)
-        hp_end = safe_mean([r.hp_end_pct for r in a.races])
+        hp_end = a.avg("hp_end_pct")
         rows.append([
             a.label,
-            ff(safe_mean([r.cat_count["white"] for r in a.races]), 1),
-            ff(safe_mean([r.cat_count["gold"] for r in a.races]), 1),
+            ff(a.avg(lambda r: r.cat_count["white"]), 1),
+            ff(a.avg(lambda r: r.cat_count["gold"]), 1),
             (frac(uni_k, n) + (f" L{a.last.unique_level}" if a.last.unique_level else "")) if has_uni else "-",
             frac(a.count(lambda r: r.cat_count["start"] > 0), n),
             frac(a.count(lambda r: r.cat_count["lead16"] > 0), n),
@@ -1269,7 +1407,7 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
             frac(a.count(lambda r: r.hp_zero_left is not None and r.hp_zero_left > 10), n),
             frac(a.count(lambda r: r.spurt_late is not None and r.spurt_late > 10), n),
             pct(hp_end),
-            pct(safe_mean([r.blocked_late for r in a.races])),
+            pct(a.avg("blocked_late")),
         ])
     R.table(["Uma", "White/r", "Gold/r", "Unique", "Perf.start", "Lead 1/6", "Lead 2/3",
              "Rushed", "Out of HP", "Late spurt", "HP left", "Blocked"], rows)
@@ -1299,16 +1437,15 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     rows = []
     for dt in sorted({r.dist_type for r in races}):
         rs = [r for r in races if r.dist_type == dt]
-        ours = [u.stats for r in rs for u in r.ours]
-        opps = [o.stats for r in rs for o in r.opponents]
+        ours = [u for r in rs for u in r.ours]
+        opps = [o for r in rs for o in r.opponents]
         if not opps:
             continue
         cells = [DIST_NAMES.get(dt, dt)]
         for k, _ in STAT_KEYS:
-            mo, mp = mean(s[k] for s in ours), mean(s[k] for s in opps)
+            mo, mp = wmean(ours, lambda u: u.stats[k]), wmean(opps, lambda o: o.stats[k])
             cells.append(f"{fi(mo)} / {fi(mp)} ({'+' if mo - mp >= 0 else ''}{fi(mo - mp)})")
-        cells.append(ff(mean(u.finish for r in rs for u in r.ours), 1) + " / " +
-                     ff(mean(o.finish for r in rs for o in r.opponents), 1))
+        cells.append(ff(wmean(ours, lambda u: u.finish), 1) + " / " + ff(wmean(opps, lambda o: o.finish), 1))
         rows.append(cells)
     R.table(["Distance"] + [f"{lbl} us/opp" for _, lbl in STAT_KEYS] + ["Place us/opp"], rows)
     lost = [r for r in races if not r.win]
@@ -1441,6 +1578,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     est: List[Tuple[float, str]] = []
     notes: List[Tuple[int, str]] = []
     n_sessions = max(1, len({r.session for r in races}))
+    # weighted number of sessions: "per session" amounts are weighted sums divided by this
+    sess_w = wsum(sessions) if sessions else n_sessions
     labels = {a.key: a.label for a in umas}
     # advice covers only the current team (latest session); history stays in the statistics
     cur = [a for a in umas if a.current] or umas
@@ -1476,12 +1615,12 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                 causes.append("started the final spurt late")
             rushed_too = sum(1 for r in short if r.rushed)
             extra = f", {rushed_too} with rushed" if rushed_too else ""
-            gain = len(short) / n * 1000 * m * per_session
+            gain = a.rate(lambda r: r.stamina_short) * 1000 * m * per_session
             est.append((gain, f"{a.name}: not enough stamina in {len(short)}/{n} races ({where}{extra}): "
                               f"{' and '.join(causes)}. STA {st['stamina']}: more Stamina or recovery skills "
                               f"(estimate: ~1 place = 1,000 base)."))
         else:
-            hp_end = safe_mean([r.hp_end_pct for r in a.races])
+            hp_end = a.avg("hp_end_pct")
             if hp_end is not None and hp_end >= 0.15 and n >= 2:
                 notes.append((3, f"{a.name}: finishes with {pct(hp_end)} HP on average and never runs dry: "
                                  f"STA {st['stamina']} is probably more than needed; in future training you can "
@@ -1490,18 +1629,19 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
         # Unique skill rarely fires (needs at least 2 races to say)
         if n >= 2 and any(r.has_unique for r in a.races):
             k = a.count(lambda r: r.cat_count["unique"] > 0)
-            if k / n < 0.6:
-                val = safe_mean([r.unique_value for r in a.races if r.unique_value]) or 2400
+            rate = a.rate(lambda r: r.cat_count["unique"] > 0)
+            if rate < 0.6:
+                val = wmean([r for r in a.races if r.unique_value], lambda r: r.unique_value) or 2400
                 uid = next((sid for sid in a.last.skills_owned if 100000 <= sid < 200000), None)
                 uname = f" \"{skills.name(uid)}\"" if uid and skills.name(uid) else ""
-                est.append(((1 - k / n) * val * m * per_session,
+                est.append(((1 - rate) * val * m * per_session,
                             f"{a.name}: unique skill{uname} fired only {k}/{n} times ({fi(val)} base each): its "
                             f"conditions (position/race phase) rarely happen with the current strategy and distance."))
 
         # Frequent rushed for this uma
         k = a.count(lambda r: r.rushed)
         if k >= 2 or (n >= 2 and k / n >= 0.4):
-            loss = sum(r.rushed_loss for r in a.races) / n
+            loss = a.avg("rushed_loss")
             wiz = st["wiz"]
             hint = "raising Wit lowers the risk" if wiz < 1200 else "Wit is already high: it is mostly bad luck"
             est.append((loss * m * per_session,
@@ -1511,7 +1651,7 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     # Rushed overall
     rushed_ur = [u for u in all_ur if u.rushed]
     if rushed_ur:
-        loss = sum(u.rushed_loss * safe_mean(u.multipliers, mult) for u in rushed_ur) / n_sessions
+        loss = wsum(rushed_ur, lambda u: u.rushed_loss * safe_mean(u.multipliers, mult)) / sess_w
         risky = sorted(cur, key=lambda a: a.last.stats["wiz"])[:4]
         est.append((loss, f"Rushed in {len(rushed_ur)}/{len(all_ur)} runs: ~{fi(loss)} final points lost per "
                           f"session in penalties alone (the wasted HP also costs places). Highest theoretical risk: "
@@ -1525,8 +1665,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
         wiz = a.last.stats["wiz"]
         if wiz >= target:
             continue
-        acts = safe_mean([r.cat_count["white"] + r.cat_count["gold"] for r in a.races], 0)
-        pts = safe_mean([r.cat_raw["white"] + r.cat_raw["gold"] for r in a.races], 0)
+        acts = a.avg(lambda r: r.cat_count["white"] + r.cat_count["gold"]) or 0
+        pts = a.avg(lambda r: r.cat_raw["white"] + r.cat_raw["gold"]) or 0
         if not acts:
             continue
         p_now, p_tgt = skill_chance(wiz), skill_chance(target)
@@ -1548,13 +1688,13 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     if sessions:
         lost_m = [s for s in sessions if not s.victory]
         if lost_m:
-            val = safe_mean([10000 * (1 + (s.opp_rate or 0)) for s in sessions], 0)
+            val = wmean(sessions, lambda s: 10000 * (1 + (s.opp_rate or 0)), 0)
             near = sum(1 for s in lost_m if s.wins == VICTORY_WINS - 1)
-            gain = len(lost_m) / len(sessions) * val
+            gain = wrate(sessions, lambda s: not s.victory) * val
             firsts = []
             for dt in sorted({r.dist_type for r in races}):
                 rs = [r for r in races if r.dist_type == dt]
-                firsts.append((sum(1 for r in rs if r.winner_side == "us") / len(rs), DIST_NAMES.get(dt, dt)))
+                firsts.append((wrate(rs, lambda r: r.winner_side == "us"), DIST_NAMES.get(dt, dt)))
             firsts.sort()
             weak = ", ".join(f"{nm} {pct(p)}" for p, nm in firsts[:2])
             est.append((gain, f"Match victory (3+ race wins, 10,000 base x the opponent bonus = ~{fi(val)} final) "
@@ -1570,8 +1710,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
             out = [u for u in r.ours if u.finish > 5]
             if len(out) == 1:
                 culprits[labels.get(out[0].key, out[0].name)] += 1
-        team_mult = safe_mean([r.team_final / r.team_raw for r in races if r.team_raw], mult)
-        gain = len(missed) / n_sessions * 4000 * team_mult
+        team_mult = wmean([r for r in races if r.team_raw], lambda r: r.team_final / r.team_raw, mult)
+        gain = wsum(missed) / sess_w * 4000 * team_mult
         who = ", ".join(f"{nm} ({c})" for nm, c in culprits.most_common(4))
         est.append((gain, f"Team bonus (all 3 in the top 5 = 4,000 base) missed in {len(missed)}/{len(races)} "
                           f"races: worth up to ~{fi(gain)} per session."
@@ -1580,7 +1720,7 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     # Perfect starts
     starts = [u for u in all_ur if u.start_delay is not None]
     if starts:
-        rate = sum(1 for u in starts if u.cat_count["start"]) / len(starts)
+        rate = wrate(starts, lambda u: u.cat_count["start"])
         per_session = len(all_ur) / n_sessions
         gain = max(0.0, 0.5 - rate) * 1000 * mult * per_session
         # who has a start skill (Concentration / Focus) and how it went
@@ -1601,7 +1741,7 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                               f"frequent: reaching 50% would be worth ~{fi(gain)} per session.{detail}"))
 
     # Opponent choice: the opponent bonus grows with the opponent's rating
-    base_per_session = sum(u.raw for u in all_ur) / n_sessions + sum(r.team_raw for r in races) / n_sessions
+    base_per_session = (wsum(all_ur, lambda u: u.raw) + wsum(races, lambda r: r.team_raw)) / sess_w
     per_k = OPP_BONUS_FIT[1] * 1000 * base_per_session
     notes.append((2, f"Opponent choice: every +1,000 opponent rating adds {ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the "
                      f"opponent bonus, about {fi(per_k)} final points per session at your scores. Pick the strongest "
@@ -1609,8 +1749,8 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                      f"the match victory (10,000 base)."))
 
     # Leads own strategy
-    l16 = sum(1 for u in all_ur if u.cat_count["lead16"]) / len(all_ur)
-    l23 = sum(1 for u in all_ur if u.cat_count["lead23"]) / len(all_ur)
+    l16 = wrate(all_ur, lambda u: u.cat_count["lead16"])
+    l23 = wrate(all_ur, lambda u: u.cat_count["lead23"])
     never_lead = [a.name for a in cur if a.n >= 2 and
                   a.count(lambda r: r.cat_count["lead16"] or r.cat_count["lead23"]) == 0]
     notes.append((4, f"'Leads own strategy' (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in {pct(l16)} "
@@ -1618,11 +1758,16 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                      ". What counts is being ahead of every other uma with the SAME strategy, opponents included."))
 
     # Umas with little data (only when the rest of the team already has enough)
-    few = [a for a in cur if a.n < RELIABLE_RACES]
+    few = [a for a in cur if eff_round(a.neff) < RELIABLE_RACES]
     if few and len(few) < len(cur):
+        def eff_txt(a):
+            e = eff_round(a.neff)
+            return f", about {e} effective" if e != a.n else ""
         notes.append((2, f"Not enough races yet for: " +
-                      ", ".join(f"{a.name} ({a.n} {plural(a.n, 'race', 'races')})" for a in few) +
-                      f". Their numbers become reliable at {RELIABLE_RACES} races."))
+                      ", ".join(f"{a.name} ({a.n} {plural(a.n, 'race', 'races')}{eff_txt(a)})" for a in few) +
+                      f". Their numbers become reliable at {RELIABLE_RACES} races"
+                      + (" (effective races: with the recency weight, older races count less)"
+                         if any(eff_round(a.neff) != a.n for a in few) else "") + "."))
 
     # Finishing position
     worst = sorted(cur, key=lambda a: -(a.avg("finish") or 0))[:3]
@@ -1856,6 +2001,9 @@ def main(argv=None) -> int:
     ap.add_argument("--csv", metavar="FOLDER", help="export the data as CSV (for Excel/Sheets)")
     ap.add_argument("--skill-names", metavar="FILE",
                     help="extra JSON with skill names (id -> name), takes precedence over skill_names.json")
+    ap.add_argument("--half-life", metavar="DAYS", type=float, default=DEFAULT_HALF_LIFE,
+                    help=f"recent sessions count more: a session DAYS older than the latest one counts half "
+                         f"(default {DEFAULT_HALF_LIFE}; 0 = every session counts the same)")
     ap.add_argument("--update-names", action="store_true",
                     help="download the latest skill names into skill_names.json (needs internet)")
     args = ap.parse_args(argv)
