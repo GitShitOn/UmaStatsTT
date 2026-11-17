@@ -695,7 +695,7 @@
 
   function secLegend() {
     return `<section class="section" id="legend" aria-labelledby="h-legend">
-      ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 385 races.')}
+      ${sectionHead('legend', 'Legend', 'How points are calculated', 'Rules derived by matching every score event against the race replays, and checked on 555 races.')}
       <dl class="panel legend-list">${E.LEGEND.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}</dl>
       <p class="note">Race files: <a href="https://github.com/ayaliz/horseACT" target="_blank" rel="noopener">horseACT</a>, a Hachimi plugin. Skill names: <a href="https://github.com/alpha123/uma-tools" target="_blank" rel="noopener">alpha123/uma-tools</a>, Global client text. The Wit-based chances use well-known community formulas and are indicative.</p>
       <p class="note">Recent weight (top of the report): with “2 weeks”, a session 2 weeks older than your latest one counts half, 4 weeks older a quarter. It changes averages, rates, shares and estimates, so they follow your current level and the current opponents; counts such as “19/49”, the session chart and the race list stay as they are.</p>

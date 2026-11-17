@@ -146,6 +146,18 @@ quarter.
   report (the choice is remembered on the device); in the script use `--half-life DAYS`
   (`0` = every session counts the same).
 
+## Advice covers the current team
+
+Statistics keep every uma you used, marked **(former)**, but the advice only looks at today's
+team (the umas in your latest session):
+
+- Advice about a single uma (stamina, unique skill, rushed, retrain, slot 1) covers current umas.
+- Team bonus and match victory use only the races run by each distance's **current line-up**
+  (the 3 umas you field there today). The match victory chance comes from each distance's win
+  rate with that line-up (at least 3 wins out of 5). With fewer than 5 such races, the races with
+  at least 2 of today's umas are used and the estimate is marked preliminary.
+- Perfect starts, rushed and "leads own strategy" count only the runs of current umas.
+
 ## Which uma to retrain first
 
 A trained uma's stats cannot change, so the way to fix a weak one is a new training. The report
@@ -202,7 +214,7 @@ Every event is worth **base points**. Each item is then multiplied by `1 + bonus
 team bonus is added at the end. The script checks that the sum matches `team_total_score`.
 The session total is the sum of its 5 races plus the match victory bonus.
 The rules below were derived by matching every score event against the race replays, and
-checked on 77 sessions (385 races, 1,155 runs).
+checked on 111 sessions (555 races, 1,665 runs).
 
 | Event | Base points |
 |---|---|
@@ -222,7 +234,7 @@ checked on 77 sessions (385 races, 1,155 runs).
 
 | Percentage bonus | Value seen |
 |---|---|
-| Opponent | −4.10% + 1.30% per 1,000 opponent rating − 0.78% per 1,000 of your own rating (fits all 77 sessions within 0.06%) |
+| Opponent | −4.10% + 1.30% per 1,000 opponent rating − 0.78% per 1,000 of your own rating (fits all 111 sessions within 0.13 points; the game rounds it) |
 | Support cards | `support_card_bonus` / 100 (e.g. 1018 = +10.18%) |
 | First uma of the distance (slot 1) | +10% |
 | Win streak | +2% on the 2nd win in a row, +3% on the 3rd, up to +5% on the 5th |

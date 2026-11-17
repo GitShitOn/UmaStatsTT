@@ -89,7 +89,7 @@
     13: '1¾ lengths', 14: '1½ lengths', 15: '1¼ lengths', 16: '1 length', 17: '¾ length', 18: '½ length',
     19: 'nose', 20: 'head', 21: 'neck' };
 
-  // Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions, error < 0.06 points).
+  // Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions; error < 0.13 points on 111).
   const OPP_BONUS_FIT = [-0.04099, 1.29733e-5, -0.78386e-5];
   const oppBonusModel = (opp, self) => OPP_BONUS_FIT[0] + OPP_BONUS_FIT[1] * opp + OPP_BONUS_FIT[2] * self;
 
@@ -729,6 +729,38 @@
 
   // ---------------------------------------------------------------- recommendations
 
+  /**
+   * The current line-up of each distance and the races it ran together (all 3 of today's umas of
+   * that distance). With fewer than MIN_RACES such races, the races with at least 2 of them are
+   * used and the distance is marked preliminary. Team-wide advice is based on these races, so umas
+   * that already left the team do not weigh on it.
+   */
+  function currentLineups(cur, races) {
+    return [...new Set(cur.map((a) => a.last.distType))].sort((x, y) => x - y).map((dt) => {
+      const keys = new Set(cur.filter((a) => a.last.distType === dt).map((a) => a.key));
+      const ofDt = races.filter((r) => r.distType === dt);
+      let rs = ofDt.filter((r) => r.ours.every((u) => keys.has(u.key)));
+      let prelim = false;
+      if (rs.length < MIN_RACES) {
+        prelim = true;
+        rs = ofDt.filter((r) => r.ours.filter((u) => keys.has(u.key)).length >= 2);
+        if (!rs.length) rs = ofDt;
+      }
+      return { dt, name: DIST_NAMES[dt] || String(dt), races: rs, prelim };
+    });
+  }
+
+  /** Probability of winning at least `need` races, given each race's win probability. */
+  function atLeast(ps, need) {
+    let dist = [1];
+    ps.forEach((p) => {
+      const nd = new Array(dist.length + 1).fill(0);
+      dist.forEach((q, k) => { nd[k] += q * (1 - p); nd[k + 1] += q * p; });
+      dist = nd;
+    });
+    return dist.slice(need).reduce((a, b) => a + b, 0);
+  }
+
   function makeRecommendations(umas, races, allUr, mult, skills, sessions) {
     const est = []; const notes = [];
     const nSessions = Math.max(1, new Set(races.map((r) => r.session)).size);
@@ -738,6 +770,10 @@
     umas.forEach((a) => { labels[a.key] = a.label; });
     // advice covers only the current team (latest session); history stays in the statistics
     const cur = umas.filter((a) => a.current).length ? umas.filter((a) => a.current) : umas;
+    const curKeys = new Set(cur.map((a) => a.key));
+    const curRuns = allUr.filter((u) => curKeys.has(u.key));
+    const lineups = currentLineups(cur, races);
+    const prelimTxt = (ls) => { const p = ls.filter((l) => l.prelim).map((l) => l.name); return p.length ? ` Preliminary for ${p.join(', ')}: few races with the current line-up yet.` : ''; };
 
     for (const a of cur) {
       // every uma on the team runs one race per session
@@ -786,11 +822,12 @@
       }
     }
 
-    const rushedUr = allUr.filter(isRushed);
+    // current umas only: each runs once per session, so the loss per session is the sum of their averages
+    const rushedUr = curRuns.filter(isRushed);
     if (rushedUr.length) {
-      const loss = wsum(rushedUr, (u) => u.rushedLoss * (mean(u.multipliers) ?? mult)) / sessW;
+      const loss = sum(cur.map((a) => a.avg((r) => r.rushedLoss * (mean(r.multipliers) ?? mult)) || 0));
       const risky = cur.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
-      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${allUr.length} runs: about ${fi(loss)} final points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
+      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${curRuns.length} runs of the current umas: about ${fi(loss)} final points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
     }
 
     const target = 1000; const witItems = [];
@@ -813,35 +850,34 @@
     // Slot 1 (+10%): warn when a teammate of the same distance would earn more with it
     aceCheck(umas).warnings.forEach((w) => notes.push({ prio: 1, kind: 'ace', text: aceWarningText(w) }));
 
-    if (sessions && sessions.length) {
-      const lostM = sessions.filter((s) => !s.victory);
-      if (lostM.length) {
-        const val = wmean(sessions, (s) => VICTORY_BASE * (1 + (s.oppRate || 0))) || 0;
-        const near = lostM.filter((s) => s.wins === VICTORY_WINS - 1).length;
-        const gain = wrate(sessions, (s) => !s.victory) * val;
-        const firsts = [...new Set(races.map((r) => r.distType))].map((dt) => {
-          const rs = races.filter((r) => r.distType === dt);
-          return [wrate(rs, (r) => r.winnerSide === 'us'), DIST_NAMES[dt] || dt];
-        }).sort((x, y) => x[0] - y[0]);
-        const weak = firsts.slice(0, 2).map(([p, nm]) => `${nm} ${pct(p)}`).join(', ');
-        est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} final) missed in ${lostM.length}/${sessions.length} sessions, ${near} of them by a single race: worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; you take 1st least often in ${weak}.` });
+    // match victory: chance of 3+ wins from each distance's win rate with its current line-up
+    if (sessions && sessions.length && lineups.length) {
+      const val = wmean(sessions, (s) => VICTORY_BASE * (1 + (s.oppRate || 0))) || 0;
+      const ps = lineups.map((l) => [wrate(l.races, (r) => r.win), l.name]);
+      const pWin = atLeast(ps.map(([p]) => p), VICTORY_WINS);
+      const gain = (1 - pWin) * val;
+      if (gain > 0) {
+        const weak = ps.slice().sort((x, y) => x[0] - y[0]).slice(0, 2).map(([p, nm]) => `${nm} ${pct(p)}`).join(', ');
+        est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} final): with the current line-ups you win ${ps.map(([p, nm]) => `${nm} ${pct(p)}`).join(', ')} of the races, so 3+ wins in about ${pct(pWin)} of sessions. Missing it is worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; the weakest distances are ${weak}.${prelimTxt(lineups)}` });
       }
     }
 
-    const missed = races.filter((r) => !r.teamIds.length);
+    // team bonus: missed races of each distance's current line-up (one race per distance per session)
+    const lineRaces = lineups.flatMap((l) => l.races);
+    const missed = lineRaces.filter((r) => !r.teamIds.length);
     if (missed.length) {
       const culprits = {};
-      missed.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1) inc(culprits, labels[out[0].key] || out[0].name); });
+      missed.forEach((r) => { const out = r.ours.filter((u) => u.finish > 5); if (out.length === 1 && curKeys.has(out[0].key)) inc(culprits, labels[out[0].key] || out[0].name); });
       const teamMult = wmean(races.filter((r) => r.teamRaw), (r) => r.teamFinal / r.teamRaw) ?? mult;
-      const gain = wsum(missed) / sessW * 4000 * teamMult;
+      const gain = sum(lineups.map((l) => wrate(l.races, (r) => !r.teamIds.length))) * 4000 * teamMult;
       const who = Object.entries(culprits).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([nm, c]) => `${nm} (${c})`).join(', ');
-      est.push({ gain, kind: 'team', text: `Team bonus (all 3 in the top 5, 4,000 base) missed in ${missed.length}/${races.length} races: worth up to about ${fi(gain)} per session.${who ? ` Races missed because of a single uma outside the top 5: ${who}.` : ''}` });
+      est.push({ gain, kind: 'team', text: `Team bonus (all 3 in the top 5, 4,000 base) missed in ${missed.length}/${lineRaces.length} races of the current line-ups: worth up to about ${fi(gain)} per session.${who ? ` Races missed because of a single uma outside the top 5: ${who}.` : ''}${prelimTxt(lineups)}` });
     }
 
-    const startsUr = allUr.filter((u) => u.startDelay != null);
+    const startsUr = curRuns.filter((u) => u.startDelay != null);
     if (startsUr.length) {
       const rate = wrate(startsUr, (u) => get(u.catCount, 'start'));
-      const gain = Math.max(0, 0.5 - rate) * 1000 * mult * allUr.length / nSessions;
+      const gain = Math.max(0, 0.5 - rate) * 1000 * mult * cur.length;
       const done = new Set(); const parts = [];
       START_SKILLS.forEach((sid) => {
         const g = startsUr.filter((u) => u.skillsOwned[sid] != null && !done.has(u));
@@ -851,7 +887,7 @@
       const rest = startsUr.filter((u) => !done.has(u));
       if (rest.length) parts.push(`neither ${rest.filter((u) => get(u.catCount, 'start')).length}/${rest.length}`);
       if (gain > 0) {
-        est.push({ gain, kind: 'start', text: `Perfect start in ${pct(rate)} of runs (+1,000 base each). It is random (about 20% without help), but skills that shorten the start delay make it much more frequent: reaching 50% would be worth about ${fi(gain)} per session. Perfect starts by skill: ${parts.join('; ')}.` });
+        est.push({ gain, kind: 'start', text: `Perfect start in ${pct(rate)} of the current umas’ runs (+1,000 base each). It is random (about 20% without help), but skills that shorten the start delay make it much more frequent: reaching 50% would be worth about ${fi(gain)} per session. Perfect starts by skill: ${parts.join('; ')}.` });
       }
     }
 
@@ -859,10 +895,10 @@
     const perK = OPP_BONUS_FIT[1] * 1000 * basePerSession;
     notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still beat: stronger rivals also push your umas down the order and can cost the match victory (10,000 base).` });
 
-    const l16 = wrate(allUr, (u) => get(u.catCount, 'lead16'));
-    const l23 = wrate(allUr, (u) => get(u.catCount, 'lead23'));
+    const l16 = wrate(curRuns, (u) => get(u.catCount, 'lead16'));
+    const l23 = wrate(curRuns, (u) => get(u.catCount, 'lead23'));
     const neverLead = cur.filter((a) => a.n >= 2 && a.count((r) => get(r.catCount, 'lead16') || get(r.catCount, 'lead23')) === 0).map((a) => a.name);
-    notes.push({ prio: 4, text: `“Leads own strategy” (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in ${pct(l16)} and ${pct(l23)} of runs${neverLead.length ? `; never by ${neverLead.join(', ')}` : ''}. What counts is being ahead of every other uma with the same strategy, opponents included.` });
+    notes.push({ prio: 4, text: `“Leads own strategy” (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in ${pct(l16)} and ${pct(l23)} of the current umas’ runs${neverLead.length ? `; never by ${neverLead.join(', ')}` : ''}. What counts is being ahead of every other uma with the same strategy, opponents included.` });
 
     const few = cur.filter((a) => Math.round(a.neff + 1e-9) < RELIABLE_RACES);
     if (few.length && few.length < cur.length) {

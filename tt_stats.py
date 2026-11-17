@@ -75,7 +75,7 @@ CHARA_NAMES = {
 }
 
 # Base-point categories (raw_score_id). Derived from the data: every score event in the
-# replay was matched against the race state (positions, HP, skills, times) over 385 races.
+# replay was matched against the race state (positions, HP, skills, times) over 555 races.
 CATEGORY_LABELS = {
     "place": "Finishing position",
     "margin": "Winning margin",
@@ -113,7 +113,7 @@ MARGIN_LABELS = {1: "more than 10 lengths", 2: "10 lengths", 3: "9 lengths", 4: 
                  11: "2 1/2 lengths", 12: "2 lengths", 13: "1 3/4 lengths", 14: "1 1/2 lengths", 15: "1 1/4 lengths",
                  16: "1 length", 17: "3/4 length", 18: "1/2 length", 19: "nose", 20: "head", 21: "neck"}
 
-# Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions, error < 0.06 points).
+# Opponent bonus = a + b * opponent rating + c * own rating (fit on 77 sessions; error < 0.13 points on 111).
 OPP_BONUS_FIT = (-0.04099, 1.29733e-5, -0.78386e-5)
 
 
@@ -1562,8 +1562,38 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
     for line in LEGEND:
         R.bullet(line)
     R.p()
-    R.p("Rules derived by matching every score event against the race replays (385 races).")
+    R.p("Rules derived by matching every score event against the race replays (555 races).")
     return R.render()
+
+
+def current_lineups(cur: List[UmaAgg], races: List[Race]) -> List[dict]:
+    """The current line-up of each distance and the races it ran together (all 3 of today's umas of
+    that distance). With fewer than MIN_RACES such races, the races with at least 2 of them are used
+    and the distance is marked preliminary. Team-wide advice is based on these races, so umas that
+    already left the team do not weigh on it."""
+    out = []
+    for dt in sorted({a.last.dist_type for a in cur}):
+        keys = {a.key for a in cur if a.last.dist_type == dt}
+        of_dt = [r for r in races if r.dist_type == dt]
+        rs = [r for r in of_dt if all(u.key in keys for u in r.ours)]
+        prelim = False
+        if len(rs) < MIN_RACES:
+            prelim = True
+            rs = [r for r in of_dt if sum(1 for u in r.ours if u.key in keys) >= 2] or of_dt
+        out.append(dict(dt=dt, name=DIST_NAMES.get(dt, str(dt)), races=rs, prelim=prelim))
+    return out
+
+
+def at_least(ps: List[float], need: int) -> float:
+    """Probability of winning at least `need` races, given each race's win probability."""
+    dist = [1.0]
+    for p in ps:
+        nd = [0.0] * (len(dist) + 1)
+        for k, q in enumerate(dist):
+            nd[k] += q * (1 - p)
+            nd[k + 1] += q * p
+        dist = nd
+    return sum(dist[need:])
 
 
 def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[UmaRace], mult: float,
@@ -1583,6 +1613,13 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     labels = {a.key: a.label for a in umas}
     # advice covers only the current team (latest session); history stays in the statistics
     cur = [a for a in umas if a.current] or umas
+    cur_keys = {a.key for a in cur}
+    cur_runs = [u for u in all_ur if u.key in cur_keys]
+    lineups = current_lineups(cur, races)
+
+    def prelim_txt(ls):
+        p = [x["name"] for x in ls if x["prelim"]]
+        return f" Preliminary for {', '.join(p)}: few races with the current line-up yet." if p else ""
 
     for a in cur:
         n = a.n
@@ -1648,12 +1685,12 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                         f"{a.name}: rushed in {k}/{n} races (-{fi(loss)} base per race in penalties, plus wasted HP). "
                         f"WIT {wiz}, theoretical risk ~{pct(rushed_chance(wiz))}: {hint}."))
 
-    # Rushed overall
-    rushed_ur = [u for u in all_ur if u.rushed]
+    # Rushed overall (current umas only: each runs once per session)
+    rushed_ur = [u for u in cur_runs if u.rushed]
     if rushed_ur:
-        loss = wsum(rushed_ur, lambda u: u.rushed_loss * safe_mean(u.multipliers, mult)) / sess_w
+        loss = sum(a.avg(lambda r: r.rushed_loss * safe_mean(r.multipliers, mult)) or 0 for a in cur)
         risky = sorted(cur, key=lambda a: a.last.stats["wiz"])[:4]
-        est.append((loss, f"Rushed in {len(rushed_ur)}/{len(all_ur)} runs: ~{fi(loss)} final points lost per "
+        est.append((loss, f"Rushed in {len(rushed_ur)}/{len(cur_runs)} runs of the current umas: ~{fi(loss)} final points lost per "
                           f"session in penalties alone (the wasted HP also costs places). Highest theoretical risk: "
                           + ", ".join(f"{a.name} (WIT {a.last.stats['wiz']}, ~{pct(rushed_chance(a.last.stats['wiz']))})"
                                       for a in risky) + "."))
@@ -1684,44 +1721,42 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
     for w in ace_check(umas)[0]:
         notes.append((1, ace_warning_text(w)))
 
-    # Match victory (3+ race wins): 10,000 x (1 + opponent bonus) per session
-    if sessions:
-        lost_m = [s for s in sessions if not s.victory]
-        if lost_m:
-            val = wmean(sessions, lambda s: 10000 * (1 + (s.opp_rate or 0)), 0)
-            near = sum(1 for s in lost_m if s.wins == VICTORY_WINS - 1)
-            gain = wrate(sessions, lambda s: not s.victory) * val
-            firsts = []
-            for dt in sorted({r.dist_type for r in races}):
-                rs = [r for r in races if r.dist_type == dt]
-                firsts.append((wrate(rs, lambda r: r.winner_side == "us"), DIST_NAMES.get(dt, dt)))
-            firsts.sort()
-            weak = ", ".join(f"{nm} {pct(p)}" for p, nm in firsts[:2])
-            est.append((gain, f"Match victory (3+ race wins, 10,000 base x the opponent bonus = ~{fi(val)} final) "
-                              f"missed in {len(lost_m)}/{len(sessions)} sessions, {near} of them by a single race: "
-                              f"worth up to ~{fi(gain)} per session. A race is won by the team with the 1st-place "
-                              f"uma; you take 1st least often in {weak}."))
+    # Match victory (3+ race wins): chance of 3+ wins from each distance's win rate with its current line-up
+    if sessions and lineups:
+        val = wmean(sessions, lambda s: 10000 * (1 + (s.opp_rate or 0)), 0)
+        ps = [(wrate(x["races"], lambda r: r.win), x["name"]) for x in lineups]
+        p_win = at_least([p for p, _nm in ps], VICTORY_WINS)
+        gain = (1 - p_win) * val
+        if gain > 0:
+            weak = ", ".join(f"{nm} {pct(p)}" for p, nm in sorted(ps, key=lambda x: x[0])[:2])
+            est.append((gain, f"Match victory (3+ race wins, 10,000 base x the opponent bonus = ~{fi(val)} final): "
+                              f"with the current line-ups you win " + ", ".join(f"{nm} {pct(p)}" for p, nm in ps)
+                              + f" of the races, so 3+ wins in ~{pct(p_win)} of sessions. Missing it is worth up to "
+                                f"~{fi(gain)} per session. A race is won by the team with the 1st-place uma; the "
+                                f"weakest distances are {weak}.{prelim_txt(lineups)}"))
 
-    # Missed team bonus: who stays out of the top 5?
-    missed = [r for r in races if not r.team_ids]
+    # Missed team bonus: races of each distance's current line-up (one race per distance per session)
+    line_races = [r for x in lineups for r in x["races"]]
+    missed = [r for r in line_races if not r.team_ids]
     if missed:
         culprits = Counter()
         for r in missed:
             out = [u for u in r.ours if u.finish > 5]
-            if len(out) == 1:
+            if len(out) == 1 and out[0].key in cur_keys:
                 culprits[labels.get(out[0].key, out[0].name)] += 1
         team_mult = wmean([r for r in races if r.team_raw], lambda r: r.team_final / r.team_raw, mult)
-        gain = wsum(missed) / sess_w * 4000 * team_mult
+        gain = sum(wrate(x["races"], lambda r: not r.team_ids) for x in lineups) * 4000 * team_mult
         who = ", ".join(f"{nm} ({c})" for nm, c in culprits.most_common(4))
-        est.append((gain, f"Team bonus (all 3 in the top 5 = 4,000 base) missed in {len(missed)}/{len(races)} "
-                          f"races: worth up to ~{fi(gain)} per session."
-                          + (f" Races missed because of a single uma outside the top 5: {who}." if who else "")))
+        est.append((gain, f"Team bonus (all 3 in the top 5 = 4,000 base) missed in {len(missed)}/{len(line_races)} "
+                          f"races of the current line-ups: worth up to ~{fi(gain)} per session."
+                          + (f" Races missed because of a single uma outside the top 5: {who}." if who else "")
+                          + prelim_txt(lineups)))
 
-    # Perfect starts
-    starts = [u for u in all_ur if u.start_delay is not None]
+    # Perfect starts (current umas only)
+    starts = [u for u in cur_runs if u.start_delay is not None]
     if starts:
         rate = wrate(starts, lambda u: u.cat_count["start"])
-        per_session = len(all_ur) / n_sessions
+        per_session = len(cur)
         gain = max(0.0, 0.5 - rate) * 1000 * mult * per_session
         # who has a start skill (Concentration / Focus) and how it went
         groups = []
@@ -1736,7 +1771,7 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                  for nm, g in groups if g]
         detail = " Perfect starts by skill: " + "; ".join(parts) + "."
         if gain > 0:
-            est.append((gain, f"Perfect start in {pct(rate)} of runs (+1,000 base each). It is random (~20% "
+            est.append((gain, f"Perfect start in {pct(rate)} of the current umas' runs (+1,000 base each). It is random (~20% "
                               f"without help), but skills that shorten the start delay make it much more "
                               f"frequent: reaching 50% would be worth ~{fi(gain)} per session.{detail}"))
 
@@ -1749,12 +1784,12 @@ def make_recommendations(umas: List[UmaAgg], races: List[Race], all_ur: List[Uma
                      f"the match victory (10,000 base)."))
 
     # Leads own strategy
-    l16 = wrate(all_ur, lambda u: u.cat_count["lead16"])
-    l23 = wrate(all_ur, lambda u: u.cat_count["lead23"])
+    l16 = wrate(cur_runs, lambda u: u.cat_count["lead16"])
+    l23 = wrate(cur_runs, lambda u: u.cat_count["lead23"])
     never_lead = [a.name for a in cur if a.n >= 2 and
                   a.count(lambda r: r.cat_count["lead16"] or r.cat_count["lead23"]) == 0]
     notes.append((4, f"'Leads own strategy' (1,000 base at 1/6 and 1,000 at 2/3 of the race) earned in {pct(l16)} "
-                     f"and {pct(l23)} of runs" + (f"; never by: {', '.join(never_lead)}" if never_lead else "") +
+                     f"and {pct(l23)} of the current umas' runs" + (f"; never by: {', '.join(never_lead)}" if never_lead else "") +
                      ". What counts is being ahead of every other uma with the SAME strategy, opponents included."))
 
     # Umas with little data (only when the rest of the team already has enough)
