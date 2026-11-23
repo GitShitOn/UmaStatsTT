@@ -1375,17 +1375,19 @@ def build_report(sessions: List[Session], args, skills: SkillDB) -> str:
                      f"{a.n}{'*' if a.n < RELIABLE_RACES else ''}",
                      ff(a.avg("finish"), 1),
                      ("+" + str(a.n - 12) + " " if a.n > 12 else "") + " ".join(str(r.finish) for r in a.races[-12:]),
-                     fi(a.avg("raw")), fi(a.avg("final")),
-                     fi(a.avg(lambda r: r.cat_raw["place"])),
-                     fi(a.avg(lambda r: sum(r.cat_raw[k] for k in SKILL_CATS))),
-                     fi(a.avg(lambda r: r.cat_raw["start"] + r.cat_raw["lead16"] + r.cat_raw["lead23"])),
-                     fi(a.avg(lambda r: r.cat_raw["rushed"]))])
-    R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Last finishes", "Base/r", "Final/r",
+                     fi(a.avg("final")), fi(a.avg("raw")),
+                     fi(a.avg(lambda r: r.cat_final["place"])),
+                     fi(a.avg(lambda r: sum(r.cat_final[k] for k in SKILL_CATS))),
+                     fi(a.avg(lambda r: r.cat_final["start"] + r.cat_final["lead16"] + r.cat_final["lead23"])),
+                     fi(a.avg(lambda r: r.cat_final["rushed"]))])
+    R.table(["Uma", "Dist.", "Style", "Slot", "Races", "Place", "Last finishes", "In-game/r", "Base/r",
              "Placing", "Skills", "Pos/start", "Rushed"], rows, "lllrrrlrrrrrr")
     if any(a.n < RELIABLE_RACES for a in umas):
         R.p(f"* fewer than {RELIABLE_RACES} races: the numbers for this uma are still preliminary.")
-    R.p("Placing/Skills/Pos-start/Rushed columns = average base points per race from: finishing position,")
-    R.p("skills, perfect start + leading own strategy (1/6 and 2/3), rushed penalty.")
+    R.p("In-game/r = average points per race as the game shows them (every bonus included); Base/r = before")
+    R.p("the bonuses, the fairest way to compare builds (slot 1 gets +10% in-game). Placing/Skills/Pos-start/Rushed")
+    R.p("columns = average in-game points per race from: finishing position, skills, perfect start + leading own")
+    R.p("strategy (1/6 and 2/3), rushed penalty.")
 
     # ---------------- Per uma: diagnostics
     R.h2("Diagnostics by uma")

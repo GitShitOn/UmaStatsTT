@@ -224,7 +224,7 @@
   }
 
   /**
-   * Current umas ranked by final points lost per session against the team's 3 best builds.
+   * Current umas ranked by in-game points lost per session against the team's 3 best builds.
    * Loss = (average base points of the best 3 - this uma's) × its multiplier
    *      + team bonuses it cost as the only uma outside the top 5.
    * A trained uma's stats cannot change, so the fix for the top of this list is a new training.
@@ -324,7 +324,7 @@
   }
 
   function aceWarningText(w) {
-    return `Slot 1 (+10% bonus): in ${w.dist} put ${w.cand} in slot 1 instead of ${w.ace}. In the ${w.n} sessions they ran together it averaged ${fi(w.candAvg)} base points vs ${fi(w.aceAvg)}: about +${fi(w.gain)} final points per session, small but free. ${w.z >= 2 ? 'Clear difference.' : 'Probable: a few more sessions will confirm it.'}`;
+    return `Slot 1 (+10% bonus): in ${w.dist} put ${w.cand} in slot 1 instead of ${w.ace}. In the ${w.n} sessions they ran together it averaged ${fi(w.candAvg)} base points vs ${fi(w.aceAvg)}: about +${fi(w.gain)} in-game points per session, small but free. ${w.z >= 2 ? 'Clear difference.' : 'Probable: a few more sessions will confirm it.'}`;
   }
 
   function rushedChance(wiz) {
@@ -827,7 +827,7 @@
     if (rushedUr.length) {
       const loss = sum(cur.map((a) => a.avg((r) => r.rushedLoss * (mean(r.multipliers) ?? mult)) || 0));
       const risky = cur.slice().sort((x, y) => x.last.stats.wiz - y.last.stats.wiz).slice(0, 4);
-      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${curRuns.length} runs of the current umas: about ${fi(loss)} final points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
+      est.push({ gain: loss, kind: 'rushed', text: `Rushed in ${rushedUr.length}/${curRuns.length} runs of the current umas: about ${fi(loss)} in-game points lost per session in penalties alone, and the wasted HP also costs places. Highest theoretical risk: ${risky.map((x) => `${x.name} (WIT ${x.last.stats.wiz}, ${pct(rushedChance(x.last.stats.wiz))})`).join(', ')}.` });
     }
 
     const target = 1000; const witItems = [];
@@ -858,7 +858,7 @@
       const gain = (1 - pWin) * val;
       if (gain > 0) {
         const weak = ps.slice().sort((x, y) => x[0] - y[0]).slice(0, 2).map(([p, nm]) => `${nm} ${pct(p)}`).join(', ');
-        est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} final): with the current line-ups you win ${ps.map(([p, nm]) => `${nm} ${pct(p)}`).join(', ')} of the races, so 3+ wins in about ${pct(pWin)} of sessions. Missing it is worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; the weakest distances are ${weak}.${prelimTxt(lineups)}` });
+        est.push({ gain, kind: 'victory', text: `Match victory (3+ race wins, 10,000 base × the opponent bonus = about ${fi(val)} in-game): with the current line-ups you win ${ps.map(([p, nm]) => `${nm} ${pct(p)}`).join(', ')} of the races, so 3+ wins in about ${pct(pWin)} of sessions. Missing it is worth up to about ${fi(gain)} per session. A race is won by the team with the 1st-place uma; the weakest distances are ${weak}.${prelimTxt(lineups)}` });
       }
     }
 
@@ -893,7 +893,7 @@
 
     const basePerSession = (wsum(allUr, (u) => u.raw) + wsum(races, (r) => r.teamRaw)) / sessW;
     const perK = OPP_BONUS_FIT[1] * 1000 * basePerSession;
-    notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} final points per session at your scores. Pick the strongest opponent you can still beat: stronger rivals also push your umas down the order and can cost the match victory (10,000 base).` });
+    notes.push({ prio: 2, text: `Opponent choice: every +1,000 opponent rating adds ${ff(OPP_BONUS_FIT[1] * 1e5, 2)} points to the opponent bonus, about ${fi(perK)} in-game points per session at your scores. Pick the strongest opponent you can still beat: stronger rivals also push your umas down the order and can cost the match victory (10,000 base).` });
 
     const l16 = wrate(curRuns, (u) => get(u.catCount, 'lead16'));
     const l23 = wrate(curRuns, (u) => get(u.catCount, 'lead23'));
@@ -907,7 +907,7 @@
     }
 
     const worst = cur.slice().sort((x, y) => y.avg((r) => r.finish) - x.avg((r) => r.finish)).slice(0, 3);
-    notes.push({ prio: 2, text: `Finishing position is the biggest item: about 1,000 base (${fi(1000 * mult)} final) per place, and 1st vs 2nd is 2,000 base plus the margin. Worst average place: ${worst.map((a) => `${a.name} ${ff(a.avg((r) => r.finish), 1)}`).join(', ')}.` });
+    notes.push({ prio: 2, text: `Finishing position is the biggest item: about 1,000 base (${fi(1000 * mult)} in-game) per place, and 1st vs 2nd is 2,000 base plus the margin. Worst average place: ${worst.map((a) => `${a.name} ${ff(a.avg((r) => r.finish), 1)}`).join(', ')}.` });
 
     const neverCounts = [];
     cur.forEach((a) => {
@@ -1041,6 +1041,14 @@
           other: a.avg((r) => get(r.catRaw, 'margin') + get(r.catRaw, 'upset') + get(r.catRaw, 'time') + get(r.catRaw, 'other')),
           rushed: a.avg((r) => get(r.catRaw, 'rushed')),
         },
+        // the same split in in-game points (each event × its real bonuses, as the game shows it)
+        srcFinal: {
+          place: a.avg((r) => get(r.catFinal, 'place')),
+          skill: a.avg((r) => SKILL_CATS.reduce((t, k) => t + get(r.catFinal, k), 0)),
+          pos: a.avg((r) => get(r.catFinal, 'start') + get(r.catFinal, 'lead16') + get(r.catFinal, 'lead23')),
+          other: a.avg((r) => get(r.catFinal, 'margin') + get(r.catFinal, 'upset') + get(r.catFinal, 'time') + get(r.catFinal, 'other')),
+          rushed: a.avg((r) => get(r.catFinal, 'rushed')),
+        },
         diag: {
           white: a.avg((r) => get(r.catCount, 'white')), gold: a.avg((r) => get(r.catCount, 'gold')),
           hasUnique, uniqueK: a.count((r) => get(r.catCount, 'unique') > 0),
@@ -1063,7 +1071,7 @@
     // mood and starts
     const moods = [...new Set(allUr.map((u) => u.mood))].sort().map((m) => {
       const us = allUr.filter((u) => u.mood === m);
-      return { mood: m, label: MOOD_NAMES[m] || String(m), n: us.length, avgFinish: mean(us.map((u) => u.finish)), avgRaw: mean(us.map((u) => u.raw)) };
+      return { mood: m, label: MOOD_NAMES[m] || String(m), n: us.length, avgFinish: mean(us.map((u) => u.finish)), avgRaw: mean(us.map((u) => u.raw)), avgFinal: mean(us.map((u) => u.final)) };
     });
     const delays = allUr.map((u) => u.startDelay).filter((d) => d != null);
     const starts = { total: delays.length, perfect: delays.filter((d) => d < 0.02).length, mean: mean(delays) };

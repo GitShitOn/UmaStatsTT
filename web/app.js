@@ -14,7 +14,7 @@
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   const skills = new E.SkillDB(window.UMA_SKILLS || {});
-  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance',
+  const state = { files: [], sessions: [], analysis: null, source: 'none', demoLabel: '', errors: [], messages: [], busy: false, umaSort: 'distance', points: 'game',
     raceView: { show: 'all', dist: 'all', uma: 'all', shown: 10 },
     tableSort: {}, halfLife: null };
   const RACE_PAGE = 10;
@@ -200,7 +200,7 @@
 
   function actionList(items, max) {
     return `<ol class="actions">${items.map((r) => `<li class="action">
-      <div class="action-gain"><strong>~${fi(r.gain)}</strong><div class="meter" aria-hidden="true"><i style="width:${Math.max(2, (r.gain / max) * 100).toFixed(1)}%"></i></div><span>final points per session</span></div>
+      <div class="action-gain"><strong>~${fi(r.gain)}</strong><div class="meter" aria-hidden="true"><i style="width:${Math.max(2, (r.gain / max) * 100).toFixed(1)}%"></i></div><span>in-game points per session</span></div>
       <p class="action-text">${esc(r.text)}</p></li>`).join('')}</ol>`;
   }
   function noteList(items) {
@@ -249,13 +249,13 @@
         ${distChip(t.mainDist, t.dist)}
         <span class="small muted">${t.n} races${t.preliminary ? ' · preliminary' : ''}</span>
       </div>
-      <p class="retrain-loss"><strong>~${fi(t.loss)}</strong> final points per session behind your 3 best builds <span class="muted">(${fi(t.own)} from its own placings and skills, ${fi(t.team)} from team bonuses it cost)</span></p>
+      <p class="retrain-loss"><strong>~${fi(t.loss)}</strong> in-game points per session behind your 3 best builds <span class="muted">(${fi(t.own)} from its own placings and skills, ${fi(t.team)} from team bonuses it cost)</span></p>
       <div class="grid-2">
         <div><h4>Why</h4><ul class="plain">${t.why.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>
         ${t.needs.length ? `<div><h4>The new one needs</h4><ul class="plain">${t.needs.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>` : ''}
       </div>
       ${next ? `<div class="retrain-next"><span class="small muted">Next in line</span><ul class="plain inline">${next}</ul></div>` : ''}
-      <p class="note">A trained uma’s stats cannot change: the fix is a new training. Ranking by final points lost per session against the average of your 3 best umas, plus the team bonuses lost when it was the only one outside the top 5.</p>
+      <p class="note">A trained uma’s stats cannot change: the fix is a new training. Ranking by in-game points lost per session against the average of your 3 best umas, plus the team bonuses lost when it was the only one outside the top 5.</p>
     </div>`;
   }
 
@@ -282,10 +282,10 @@
         ${tile('Average points per session', fi(A.totalAvg), `${A.nSessions} ${plural(A.nSessions, 'session', 'sessions')}${A.halfLife > 0 ? ', recent ones count more' : ''}`)}
         ${tile('Average points per race', fi(A.raceAvg), `${A.nRaces} races`)}
         ${tile('Races won', `${A.wins} of ${A.nRaces}`, `${pct(A.wins / A.nRaces)} · ${A.victories} of ${A.nSessions} matches won`)}
-        ${tile('1 base point is worth', `${ff(A.mult, 2)} final`, `${ff(A.mult + 0.1, 2)} for the first uma of the distance`)}
+        ${tile('1 base point is worth', `${ff(A.mult, 2)} in-game`, `${ff(A.mult + 0.1, 2)} for the first uma of the distance`)}
       </div>
       <div class="panel"><h3>Score by session</h3>${sessionChart(A)}</div>
-      <div class="section-head"><h3>The 5 things worth the most</h3><p class="note">Estimated extra final points per session. The full list is under “What to improve”.</p></div>
+      <div class="section-head"><h3>The 5 things worth the most</h3><p class="note">Estimated extra in-game points per session. The full list is under “What to improve”.</p></div>
       ${actionList(top, max)}
       ${apt.length ? `<div class="section-head"><h3>Warnings</h3></div>${noteList(apt)}` : ''}
       ${aceStatus(A)}
@@ -328,22 +328,22 @@
       const v = b.cfg ? b.cfg.map((x) => `+${pct(x, 2)}`).join(', ') : (b.max - b.min > 0.002 ? `+${pct(b.min, 1)} … +${pct(b.max, 1)}` : `+${pct(b.mean, 1)}`);
       return `<span><b>${esc(b.label)}</b> ${esc(v)}</span>`;
     }).join('');
-    const moods = A.moods.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${m.n}</td><td class="n">${ff(m.avgFinish, 1)}</td><td class="n">${fi(m.avgRaw)}</td></tr>`).join('');
+    const moods = A.moods.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${m.n}</td><td class="n">${ff(m.avgFinish, 1)}</td><td class="n">${fi(m.avgFinal)}</td><td class="n">${fi(m.avgRaw)}</td></tr>`).join('');
     const st = A.starts;
     return `<section class="section" id="scoring" aria-labelledby="h-scoring">
       ${sectionHead('scoring', 'Scoring', 'Where the points come from', 'Every race event is worth <strong>base points</strong>; then every percentage bonus multiplies them. To go up, raise your base points.')}
       <div class="panel"><h3>Percentage bonuses seen</h3><div class="kv">${bonus}</div>
-        <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} final points.</p>
+        <p class="note" style="margin-top:8px">Race score = base points × (1 + bonuses) for every event, plus the team bonus. On average 1 base point is worth ${ff(A.mult, 2)} in-game points.</p>
         <p class="note" style="margin-top:8px">Opponent bonus = ${pct(A.oppFormula.a, 2)} + ${pct(A.oppFormula.perK, 2)} per 1,000 opponent rating − ${pct(-A.oppFormula.selfPerK, 2)} per 1,000 of your own rating${A.oppFormula.maxErr != null ? `; on your sessions it is off by at most ${pct(A.oppFormula.maxErr, 2)}` : ''}. A stronger opponent raises the multiplier.</p></div>
       <div class="table-wrap"><table class="sortable" id="tbl-sources">
-        <thead><tr><th class="first">Item</th><th class="n">Base points per event</th><th class="n">Present</th><th>Final points per race</th><th class="n">Share</th></tr></thead>
+        <thead><tr><th class="first">Item</th><th class="n">Base points per event</th><th class="n">Present</th><th>In-game points per race</th><th class="n">Share</th></tr></thead>
         <tbody>${rows}</tbody>
         <tfoot><tr><th class="first">Total</th><th></th><th></th><th><div class="barcell"><span class="track"></span><span class="v">${fi(A.raceAvg)}</span></div></th><th class="n">100%</th></tr></tfoot>
       </table></div>
       <p class="note">“Present” = in how many runs (one uma in one race) the item shows up; for the team bonus, in how many races; for the match victory, in how many sessions. The match victory (3+ race wins) is not in the files: it is computed from the rule.</p>
       <div class="grid-2">
         <div class="panel"><h3>Mood</h3><div class="table-wrap"><table>
-          <thead><tr><th>Mood</th><th class="n">Runs</th><th class="n">Avg place</th><th class="n">Avg base</th></tr></thead><tbody>${moods}</tbody></table></div></div>
+          <thead><tr><th>Mood</th><th class="n">Runs</th><th class="n">Avg place</th><th class="n">Avg in-game</th><th class="n">Avg base</th></tr></thead><tbody>${moods}</tbody></table></div></div>
         <div class="panel"><h3>Starts</h3>${st.total ? `<p class="tile-value">${st.perfect}/${st.total}</p><p class="note">Perfect starts (delay under 0.02 s): ${pct(st.perfect / st.total)}. Average delay ${ff(st.mean, 3)} s. Without start skills you can expect about 20%.</p>` : '<p class="note">The replay cannot be read in this browser.</p>'}</div>
       </div>
     </section>`;
@@ -406,18 +406,27 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitTopbar); // web fonts change the links' width
   fitTopbar();
 
+  // Umas section points: in-game (with every bonus, as the game shows them) or base
+  const POINTS_KEY = 'umastats.points';
+  function loadPoints() { try { return localStorage.getItem(POINTS_KEY) === 'base' ? 'base' : 'game'; } catch (e) { return 'game'; } }
+  const inGame = () => state.points !== 'base';
+  const umaSrc = (u) => (inGame() ? u.srcFinal : u.src);
+  const umaAvg = (u) => (inGame() ? u.avgFinal : u.avgRaw);
+  const ptsWord = () => (inGame() ? 'in-game points' : 'base points');
+
   const SORT_KEY = 'umastats.umaSort';
   function loadSort() { try { return localStorage.getItem(SORT_KEY) === 'score' ? 'score' : 'distance'; } catch (e) { return 'distance'; } }
   function saveSort(v) { try { localStorage.setItem(SORT_KEY, v); } catch (e) { /* storage not available */ } }
   function orderedUmas(A) {
     if (state.umaSort !== 'score') return A.umas;
     // current team first, each part from the highest average score down
-    return A.umas.slice().sort((x, y) => (x.current === y.current ? 0 : x.current ? -1 : 1) || y.avgRaw - x.avgRaw);
+    return A.umas.slice().sort((x, y) => (x.current === y.current ? 0 : x.current ? -1 : 1) || umaAvg(y) - umaAvg(x));
   }
 
   function umaStack(A, list) {
     const byScore = state.umaSort === 'score';
-    const totals = list.map((u) => SRC_KEYS.reduce((t, [k]) => t + Math.max(0, u.src[k] || 0), 0));
+    const totals = list.map((u) => SRC_KEYS.reduce((t, [k]) => t + Math.max(0, umaSrc(u)[k] || 0), 0));
+    const word = ptsWord();
     const { max, step } = niceScale(Math.max(...totals));
     let html = `<div class="legend">${SRC_KEYS.map(([, l, c]) => `<span class="${c}"><i aria-hidden="true"></i>${esc(l)}</span>`).join('')}</div><div class="stack-chart${byScore ? ' by-score' : ''}">`;
     let lastDist = null;
@@ -426,16 +435,19 @@
         html += `<div class="stack-group">${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</div>`;
         lastDist = u.mainDist;
       }
-      const segs = SRC_KEYS.filter(([k]) => u.src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${u.src[k].toFixed(1)} 1 0" ${tipAttr(fi(u.src[k]), `${l} · ${u.label}`, 'average base points per race')}></i>`).join('');
-      const rushed = u.src.rushed ? ` · rushed ${fi(u.src.rushed)}` : '';
+      const src = umaSrc(u);
+      const segs = SRC_KEYS.filter(([k]) => src[k] > 0).map(([k, l, c]) => `<i class="${c}" tabindex="0" style="flex:${src[k].toFixed(1)} 1 0" ${tipAttr(fi(src[k]), `${l} · ${u.label}`, inGame() ? `average in-game points per race · ${fi(u.src[k])} base` : `average base points per race · ${fi(u.srcFinal[k])} in-game`)}></i>`).join('');
+      const rushed = src.rushed ? ` · rushed ${fi(src.rushed)}` : '';
       html += `<div class="stack-row${u.current ? '' : ' ex'}" data-uma="${esc(u.key)}" title="Open ${esc(u.label)}’s card"><div class="stack-name">${byScore ? `<span class="rank">${i + 1}</span>` : ''}<a href="#uma-${esc(u.key)}">${esc(u.name)}</a>${umaTag(u)}${byScore ? ` <span class="chip small d${esc(u.mainDist)}"><i aria-hidden="true"></i>${esc(E.DIST_NAMES[u.mainDist] || u.distLabel)}</span>` : ''}</div>
-        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} average base points per race${rushed}`)}">${segs}</div></div>
-        <span class="stack-total" ${tipAttr(fi(u.avgRaw), `${u.label} · average base points per race`, u.src.rushed ? `including rushed ${fi(u.src.rushed)}` : '')}>${fi(u.avgRaw)}</span></div>`;
+        <div class="stack-area"><div class="stack-track" style="width:${((totals[i] / max) * 100).toFixed(2)}%" role="img" aria-label="${esc(`${u.label}: ${fi(totals[i])} average ${word} per race${rushed}`)}">${segs}</div></div>
+        <span class="stack-total" ${tipAttr(fi(umaAvg(u)), `${u.label} · average ${word} per race`, `${inGame() ? `${fi(u.avgRaw)} base` : `${fi(u.avgFinal)} in-game`}${src.rushed ? ` · including rushed ${fi(src.rushed)}` : ''}`)}>${fi(umaAvg(u))}</span></div>`;
     });
     const ticks = [];
     for (let v = 0; v <= max + 1e-6; v += step) ticks.push(`<span style="left:${((v / max) * 100).toFixed(2)}%">${compact(v)}</span>`);
     html += `<div class="axis-row"><div class="axis-spacer"></div><div class="axis">${ticks.join('')}</div><div></div></div></div>
-      <p class="note">The number on the right is the net total per race, rushed penalties included.</p>`;
+      <p class="note">The number on the right is the net total per race, rushed penalties included.${inGame()
+        ? ' In-game points include every bonus (opponent, support cards, slot 1 +10%, win streak), as the game shows them: the uma in slot 1 starts 10% ahead, so to compare two builds switch to Base.'
+        : ' Base points are before the bonuses: the fairest way to compare two builds.'}</p>`;
     return html;
   }
 
@@ -447,7 +459,7 @@
       return `<tr${u.current ? '' : ' class="ex"'} data-uma="${esc(u.key)}" title="Open ${esc(u.label)}’s card">
         <td class="first"><a href="#uma-${esc(u.key)}">${esc(u.name)}</a>${umaTag(u)}${u.n < E.RELIABLE_RACES ? '<sup class="muted" title="fewer races than needed for reliable numbers">*</sup>' : ''}</td>
         <td data-sort="${u.avgFinish != null ? -u.avgFinish : ''}" title="average place ${u.avgFinish != null ? ff(u.avgFinish, 1) : '–'}">${posRow(u.finishes, 6)}</td>
-        <td class="n">${fi(u.avgRaw)}</td>
+        <td class="n" title="${inGame() ? `${fi(u.avgRaw)} base` : `${fi(u.avgFinal)} in-game`}">${fi(umaAvg(u))}</td>
         <td class="n">${ff(d.white, 1)}</td>
         <td class="n">${ff(d.gold, 1)}</td>
         <td class="n">${uni}</td>
@@ -461,7 +473,7 @@
         <td class="n">${pct(d.blocked)}</td></tr>`;
     }).join('');
     return `<div class="table-wrap"><table class="diag sortable" id="tbl-diag">
-      <thead><tr><th class="first">Uma</th><th title="sorts by average place">Last finishes</th><th class="n">Base/race</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
+      <thead><tr><th class="first">Uma</th><th title="sorts by average place">Last finishes</th><th class="n" title="average ${ptsWord()} per race">${inGame() ? 'Points/race' : 'Base/race'}</th><th class="n">White/race</th><th class="n">Gold/race</th><th class="n">Unique</th><th class="n">Perfect start</th><th class="n">Lead 1/6</th><th class="n">Lead 2/3</th><th class="n">Rushed</th><th class="n">Out of HP</th><th class="n">Late spurt</th><th class="n">HP left</th><th class="n">Blocked</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
       <p class="note">Click a row to open that uma’s card, or a column title to sort by it. ${A.umas.some((u) => u.n < E.RELIABLE_RACES) ? `* fewer than ${E.RELIABLE_RACES} races: preliminary numbers. ` : ''}Unique = races in which the unique skill fired (L = level). Out of HP = HP hit zero more than 10 m before the finish. Late spurt = final spurt started more than 10 m after the 2/3 mark, a sign of too little stamina. Lead = ahead of every uma with the same strategy. Blocked = share of time with an uma ahead closing the way in the last third.</p>`;
   }
@@ -478,7 +490,7 @@
       <summary>
         <span class="card-title"><strong>${esc(u.name)}</strong><span>${distChip(u.mainDist, u.distLabel)} ${esc(style)}${tag}</span></span>
         ${posRow(u.finishes)}
-        <span class="card-score"><b>${fi(u.avgRaw)} base</b>${fi(u.avgFinal)} final per race</span>
+        <span class="card-score">${inGame() ? `<b>${fi(u.avgFinal)} per race</b>${fi(u.avgRaw)} base` : `<b>${fi(u.avgRaw)} base</b>${fi(u.avgFinal)} in-game per race`}</span>
       </summary>
       <div class="card-body">
         <div class="stats">${statCells}</div>
@@ -489,7 +501,7 @@
           ${u.diag.uniqueName ? `<span>Unique: <b>${esc(u.diag.uniqueName)}</b> ${u.diag.uniqueK}/${u.n}</span>` : ''}
         </div>
         <div class="table-wrap"><table>
-          <thead><tr><th>Race</th><th>Course</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
+          <thead><tr><th>Race</th><th>Course</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">In-game</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
           <tbody>${races}</tbody></table></div>
         <div class="table-wrap"><table>
           <thead><tr><th>Skill</th><th class="n">ID</th><th>Kind</th><th class="n">Lvl</th><th class="n">Activations</th><th class="n">Base points</th></tr></thead>
@@ -513,10 +525,12 @@
   function secUmas(A) {
     const list = orderedUmas(A);
     const opt = (v, l) => `<button type="button" class="seg${state.umaSort === v ? ' on' : ''}" data-action="uma-sort" data-sort="${v}" aria-pressed="${state.umaSort === v}">${l}</button>`;
+    const popt = (v, l) => `<button type="button" class="seg${state.points === v ? ' on' : ''}" data-action="uma-points" data-v="${v}" aria-pressed="${state.points === v}">${l}</button>`;
     return `<section class="section" id="umas" aria-labelledby="h-umas">
-      ${sectionHead('umas', 'Umas', 'How each uma performs', 'Average base points per race, split by source. Hover a bar (or tap it on a phone) to see each part’s value; click a row to open that uma’s card with its races and skills.')}
+      ${sectionHead('umas', 'Umas', 'How each uma performs', `Average ${inGame() ? 'in-game points (as the game shows them, bonuses included)' : 'base points (before the bonuses)'} per race, split by source. Hover a bar (or tap it on a phone) to see each part’s value; click a row to open that uma’s card with its races and skills.`)}
       ${teamChangesPanel(A)}
-      <div class="sortbar" role="group" aria-label="Order umas"><span class="small muted">Order</span>${opt('distance', 'By distance')}${opt('score', 'By average score')}</div>
+      <div class="sortbars"><div class="sortbar" role="group" aria-label="Order umas"><span class="small muted">Order</span>${opt('distance', 'By distance')}${opt('score', 'By average score')}</div>
+      <div class="sortbar" role="group" aria-label="Points shown"><span class="small muted">Points</span>${popt('game', 'In-game')}${popt('base', 'Base')}</div></div>
       <div class="panel">${umaStack(A, list)}</div>
       <div class="section-head"><h3>Diagnostics</h3></div>
       ${diagTable(A, list)}
@@ -616,7 +630,7 @@
         ${posRow(r.ours.map((u) => u.finish))}
         <span class="card-score"><b>${fi(r.total)}</b>points</span>
       </summary><div class="card-body"><div class="table-wrap"><table>
-        <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">Final</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
+        <thead><tr><th class="first">Uma</th><th class="n">Slot</th><th>Finish</th><th class="n">Pop.</th><th>Mood</th><th class="n">Base</th><th class="n">In-game</th><th class="n">Skills w/g/u</th><th>Notes</th></tr></thead>
         <tbody>${rows}</tbody></table></div></div></details>`;
   }
 
@@ -686,7 +700,7 @@
   function secPriorities(A) {
     const max = Math.max(1, ...A.recs.est.map((r) => r.gain));
     return `<section class="section" id="improve" aria-labelledby="h-improve">
-      ${sectionHead('improve', 'What to improve', 'Priorities, by points', 'Estimates in final points per session. They are meant to rank priorities, not to predict exact results.')}
+      ${sectionHead('improve', 'What to improve', 'Priorities, by points', 'Estimates in in-game points per session. They are meant to rank priorities, not to predict exact results.')}
       ${actionList(A.recs.est, max)}
       <div class="section-head"><h3>Other notes</h3></div>
       ${noteList(A.recs.notes)}
@@ -915,6 +929,13 @@
     const btn = e.target.closest ? e.target.closest('[data-action]') : null;
     if (!btn) return;
     const a = btn.dataset.action;
+    if (a === 'uma-points') {
+      state.points = btn.dataset.v === 'base' ? 'base' : 'game';
+      try { localStorage.setItem(POINTS_KEY, state.points); } catch (err) { /* storage not available */ }
+      const sec = document.getElementById('umas');
+      if (sec && state.analysis) { sec.outerHTML = secUmas(state.analysis); enhanceSortable(document.getElementById('umas')); }
+      return;
+    }
     if (a === 'uma-sort') {
       state.umaSort = btn.dataset.sort === 'score' ? 'score' : 'distance';
       saveSort(state.umaSort);
@@ -1025,6 +1046,7 @@
 
   (async function start() {
     state.umaSort = loadSort();
+    state.points = loadPoints();
     state.halfLife = loadHalfLife();
     const saved = await loadSaved();
     if (saved && saved.length) {

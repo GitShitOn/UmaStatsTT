@@ -462,6 +462,7 @@ table .posrow { flex-wrap: nowrap; }
 table.diag .pos { min-width: 20px; height: 20px; font-size: 0.7rem; border-radius: 5px; }
 table.diag td { padding-block: 6px; }
 .sortbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sortbars { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; }
 .sortbar .small { margin-right: 4px; }
 .seg { font: inherit; font-size: var(--step--1); font-weight: 600; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
 .seg:hover { border-color: var(--ink-2); }

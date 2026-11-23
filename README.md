@@ -52,7 +52,9 @@ The page contains:
 - results by distance;
 - each uma's points split by source, with diagnostics and a card (races and skills), ordered
   by distance or by average score; clicking an uma in the chart or in the diagnostics table
-  opens its card;
+  opens its card. **Points: In-game · Base** switches between the points the game shows (every
+  bonus included, about 55-60k per race) and the base points before the bonuses (about 20k),
+  which are the fairer way to compare two builds since slot 1 gets +10% in-game;
 - your stats compared with your opponents';
 - skills that never fired;
 - race by race: one row per session (newest first, 10 at a time) that opens its races, with
@@ -239,7 +241,8 @@ checked on 111 sessions (555 races, 1,665 runs).
 | First uma of the distance (slot 1) | +10% |
 | Win streak | +2% on the 2nd win in a row, +3% on the 3rd, up to +5% on the 5th |
 
-In practice 1 base point is worth about 2.6-2.8 final points. What moves your score is base points.
+In practice 1 base point is worth about 2.7-2.9 in-game points (the web app calls the points
+after the bonuses "in-game", the script "final"). What moves your score is base points.
 A stronger opponent raises the multiplier: every +1,000 opponent rating is worth about 1.3% of
 your base points per session.
 
